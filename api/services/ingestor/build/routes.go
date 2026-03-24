@@ -1,0 +1,38 @@
+package build
+
+import (
+	"github.com/jkarage/logingestor/app/domain/auditapp"
+	"github.com/jkarage/logingestor/app/domain/checkapp"
+	"github.com/jkarage/logingestor/app/domain/userapp"
+	"github.com/jkarage/logingestor/app/sdk/mux"
+	"github.com/jkarage/logingestor/foundation/web"
+)
+
+// Routes binds all the routes for the sales service.
+func Routes() all {
+	return all{}
+}
+
+type all struct{}
+
+// Add implements the RouterAdder interface.
+func (all) Add(app *web.App, cfg mux.Config) {
+	checkapp.Routes(app, checkapp.Config{
+		Build: cfg.Build,
+		Log:   cfg.Log,
+		DB:    cfg.DB,
+	})
+
+	userapp.Routes(app, userapp.Config{
+		Log:        cfg.Log,
+		UserBus:    cfg.BusConfig.UserBus,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+	})
+
+	auditapp.Routes(app, auditapp.Config{
+		Log:        cfg.Log,
+		AuditBus:   cfg.BusConfig.AuditBus,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+	})
+
+}

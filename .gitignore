@@ -19,3 +19,8 @@
 
 # Go workspace file
 go.work
+zarf/keys/
+private.pem
+.env
+.DS_Store
+

@@ -14,18 +14,15 @@ import (
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/jkarage/logingestor/api/services/ingestor/build"
+	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/debug"
 	"github.com/jkarage/logingestor/app/sdk/mux"
-	"github.com/jkarage/logingestor/business/domain/auditbus"
-	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
-	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
 	"github.com/jkarage/logingestor/business/domain/userbus"
-	"github.com/jkarage/logingestor/business/domain/userbus/extensions/useraudit"
-	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/usercache"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
+	"github.com/jkarage/logingestor/foundation/keystore"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/otel"
 )
@@ -41,7 +38,7 @@ func main() {
 		},
 	}
 
-	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "INGESTOR", otel.GetTraceID, events)
+	log = logger.NewWithEvents(os.Stdout, logger.LevelInfo, "AUTH", otel.GetTraceID, events)
 
 	// -------------------------------------------------------------------------
 
@@ -70,41 +67,46 @@ func run(ctx context.Context, log *logger.Logger) error {
 			WriteTimeout       time.Duration `conf:"default:10s"`
 			IdleTimeout        time.Duration `conf:"default:120s"`
 			ShutdownTimeout    time.Duration `conf:"default:20s"`
-			APIHost            string        `conf:"default:0.0.0.0:3002"`
-			DebugHost          string        `conf:"default:0.0.0.0:3012"`
+			APIHost            string        `conf:"default:0.0.0.0:6000"`
+			DebugHost          string        `conf:"default:0.0.0.0:6010"`
+			GRPCHost           string        `conf:"default:0.0.0.0:6001"`
 			CORSAllowedOrigins []string      `conf:"default:*"`
 		}
+		Auth struct {
+			KeysJSON   string `conf:"mask"`
+			KeysFolder string `conf:"default:zarf/keys/"`
+			ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
+			Issuer     string `conf:"default:service project"`
+		}
 		DB struct {
-			User         string `conf:"default:postgres,env:DB_USERNAME"`
-			Password     string `conf:"default:postgres,env:DB_PASSWORD,mask"`
-			Host         string `conf:"default:12.13.14.15:5432,env:DB_HOST"`
-			Name         string `conf:"default:bsa,env:DB_NAME"`
+			User         string `conf:"default:postgres"`
+			Password     string `conf:"default:postgres,mask"`
+			Host         string `conf:"default:database-service"`
+			Name         string `conf:"default:postgres"`
 			MaxIdleConns int    `conf:"default:0"`
 			MaxOpenConns int    `conf:"default:0"`
-			DisableTLS   bool   `conf:"default:false"`
+			DisableTLS   bool   `conf:"default:true"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
-			ServiceName string  `conf:"default:sales"`
+			ServiceName string  `conf:"default:auth"`
 			Probability float64 `conf:"default:0.05"`
-			// Shouldn't use a high Probability value in non-developer systems.
-			// 0.05 should be enough for most systems. Some might want to have
-			// this even lower.
 		}
 	}{
 		Version: conf.Version{
 			Build: tag,
-			Desc:  "INGESTOR",
+			Desc:  "Auth",
 		},
 	}
 
-	const prefix = "INGESTOR"
+	const prefix = "AUTH"
 	help, err := conf.Parse(prefix, &cfg)
 	if err != nil {
 		if errors.Is(err, conf.ErrHelpWanted) {
 			fmt.Println(help)
 			return nil
 		}
+
 		return fmt.Errorf("parsing config: %w", err)
 	}
 
@@ -148,16 +150,65 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// Create Business Packages
 
 	delegate := delegate.New(log)
+	userBus := userbus.NewBusiness(log, delegate, usercache.NewStore(log, userdb.NewStore(log, db), time.Minute))
 
-	auditOtelExt := auditotel.NewExtension()
-	auditStorage := auditdb.NewStore(log, db)
-	auditBus := auditbus.NewBusiness(log, auditStorage, auditOtelExt)
+	// -------------------------------------------------------------------------
+	// Initialize authentication support
 
-	userOtelExt := userotel.NewExtension()
-	userAuditExt := useraudit.NewExtension(auditBus)
-	userStorage := usercache.NewStore(log, userdb.NewStore(log, db), time.Minute)
+	log.Info(ctx, "startup", "status", "initializing authentication support")
 
-	userBus := userbus.NewBusiness(log, delegate, userStorage, userOtelExt, userAuditExt)
+	// Check the environment first to see if a key is being provided. Then
+	// load any private keys files from disk. We can assume some system like
+	// Vault has created these files already. How that happens is not our
+	// concern.
+
+	ks := keystore.New()
+
+	n1, err := ks.LoadByJSON(cfg.Auth.KeysJSON)
+	if err != nil {
+		return fmt.Errorf("loading keys by env: %w", err)
+	}
+
+	n2, err := ks.LoadByFileSystem(os.DirFS(cfg.Auth.KeysFolder))
+	if err != nil {
+		return fmt.Errorf("loading keys by fs: %w", err)
+	}
+
+	if n1+n2 == 0 {
+		return errors.New("no keys exist")
+	}
+
+	authCfg := auth.Config{
+		Log:       log,
+		UserBus:   userBus,
+		KeyLookup: ks,
+		Issuer:    cfg.Auth.Issuer,
+	}
+
+	ath := auth.New(authCfg)
+
+	// -------------------------------------------------------------------------
+	// Start Tracing Support
+
+	log.Info(ctx, "startup", "status", "initializing tracing support")
+
+	traceProvider, teardown, err := otel.InitTracing(otel.Config{
+		ServiceName: cfg.Tempo.ServiceName,
+		Host:        cfg.Tempo.Host,
+		ExcludedRoutes: map[string]struct{}{
+			"/v1/liveness":  {},
+			"/v1/readiness": {},
+		},
+		Probability: cfg.Tempo.Probability,
+	})
+	if err != nil {
+		return fmt.Errorf("starting tracing: %w", err)
+	}
+
+	defer teardown(context.Background())
+
+	tracer := traceProvider.Tracer(cfg.Tempo.ServiceName)
+
 	// -------------------------------------------------------------------------
 	// Start Debug Service
 
@@ -171,27 +222,28 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	// -------------------------------------------------------------------------
 	// Start API Service
-	log.Info(ctx, "startup", "status", "initializing V1 API support")
+
+	log.Info(ctx, "startup", "status", "initializing tracing support")
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	cfgMux := mux.Config{
-		Build: tag,
-		Log:   log,
+		Build:  tag,
+		Log:    log,
+		DB:     db,
+		Tracer: tracer,
 		BusConfig: mux.BusConfig{
 			UserBus: userBus,
 		},
+		AuthConfig: mux.AuthConfig{ 
+			Auth: ath,
+		},
 	}
-
-	webAPI := mux.WebAPI(cfgMux,
-		build.Routes(),
-		mux.WithCORS(cfg.Web.CORSAllowedOrigins),
-	)
 
 	api := http.Server{
 		Addr:         cfg.Web.APIHost,
-		Handler:      webAPI,
+		Handler:      mux.WebAPI(cfgMux, build.Routes(), mux.WithCORS(cfg.Web.CORSAllowedOrigins)),
 		ReadTimeout:  cfg.Web.ReadTimeout,
 		WriteTimeout: cfg.Web.WriteTimeout,
 		IdleTimeout:  cfg.Web.IdleTimeout,
@@ -205,9 +257,6 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 		serverErrors <- api.ListenAndServe()
 	}()
-
-	// -------------------------------------------------------------------------
-	// Shutdown
 
 	select {
 	case err := <-serverErrors:

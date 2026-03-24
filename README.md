@@ -1,3 +1,3 @@
 # logingestor
-Log Ingestor and Query interface
-** IN PROGRESS **
+
+An API for bsa internal log monitorings.

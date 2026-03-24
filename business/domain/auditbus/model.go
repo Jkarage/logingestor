@@ -1,0 +1,34 @@
+package auditbus
+
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jkarage/logingestor/business/types/domain"
+	"github.com/jkarage/logingestor/business/types/name"
+)
+
+// Audit represents information about an individual audit record.
+type Audit struct {
+	ID        uuid.UUID
+	ObjID     uuid.UUID
+	ObjDomain domain.Domain
+	ObjName   name.Name
+	ActorID   uuid.UUID
+	Action    string
+	Data      json.RawMessage
+	Message   string
+	Timestamp time.Time
+}
+
+// NewAudit represents the information needed to create a new audit record.
+type NewAudit struct {
+	ObjID     uuid.UUID
+	ObjDomain domain.Domain
+	ObjName   name.Name
+	ActorID   uuid.UUID
+	Action    string
+	Data      any
+	Message   string
+}
