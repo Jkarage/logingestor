@@ -29,7 +29,9 @@ var (
 // Claims represents the authorization claims transmitted via a JWT.
 type Claims struct {
 	jwt.RegisteredClaims
-	Roles []string `json:"roles"`
+	Roles     []string `json:"roles"`
+	ProjectID string   `json:"project_id"`
+	OrgID     string   `json:"org_id"`
 }
 
 // KeyLookup declares a method set of behavior for looking up

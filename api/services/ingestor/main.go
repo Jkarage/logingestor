@@ -14,6 +14,8 @@ import (
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/jkarage/logingestor/api/services/ingestor/build"
+	"github.com/jkarage/logingestor/app/sdk/auth"
+	http2 "github.com/jkarage/logingestor/app/sdk/authclient/http"
 	"github.com/jkarage/logingestor/app/sdk/debug"
 	"github.com/jkarage/logingestor/app/sdk/mux"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
@@ -26,6 +28,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
+	"github.com/jkarage/logingestor/foundation/keystore"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/otel"
 )
@@ -83,6 +86,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			MaxOpenConns int    `conf:"default:0"`
 			DisableTLS   bool   `conf:"default:false"`
 		}
+		Auth struct {
+			Host       string `conf:"default:http://localhost:6000"`
+			KeysFolder string `conf:"default:zarf/keys/"`
+			ActiveKID  string `conf:"default:231c6f21-0207-4d5c-bc83-a4fdbd5cb06f"`
+			Issuer     string `conf:"default:confirm mail"`
+		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
 			ServiceName string  `conf:"default:sales"`
@@ -94,7 +103,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}{
 		Version: conf.Version{
 			Build: tag,
-			Desc:  "INGESTOR",
+			Desc:  "Ingestor",
 		},
 	}
 
@@ -156,8 +165,50 @@ func run(ctx context.Context, log *logger.Logger) error {
 	userOtelExt := userotel.NewExtension()
 	userAuditExt := useraudit.NewExtension(auditBus)
 	userStorage := usercache.NewStore(log, userdb.NewStore(log, db), time.Minute)
-
 	userBus := userbus.NewBusiness(log, delegate, userStorage, userOtelExt, userAuditExt)
+
+	// -------------------------------------------------------------------------
+	// Initialize authentication support
+	log.Info(ctx, "startup", "status", "initializing authentication support")
+
+	// Check the environment first to see if a key is being provided. Then
+	// load any private keys files from disk. We can assume some system like
+	// Vault has created these files already. How that happens is not our
+	// concern.
+
+	ks := keystore.New()
+
+	// n1, err := ks.LoadByJSON(cfg.Auth.KeysJSON)
+	// if err != nil {
+	// 	return fmt.Errorf("loading keys by env: %w", err)
+	// }
+
+	n, err := ks.LoadByFileSystem(os.DirFS(cfg.Auth.KeysFolder))
+	if err != nil {
+		return fmt.Errorf("loading keys by fs: %w", err)
+	}
+
+	if n == 0 {
+		return errors.New("no keys exist")
+	}
+
+	authCfg := auth.Config{
+		Log:       log,
+		UserBus:   userBus,
+		KeyLookup: ks,
+		Issuer:    cfg.Auth.Issuer,
+	}
+
+	ath := auth.New(authCfg)
+
+	authClient, err := http2.New(log, cfg.Auth.Host)
+	if err != nil {
+		log.Error(ctx, "failed to initialize authentication client", "error", err)
+		return fmt.Errorf("failed to initialize authentication client: %w", err)
+	}
+
+	defer authClient.Close()
+
 	// -------------------------------------------------------------------------
 	// Start Debug Service
 
@@ -180,7 +231,14 @@ func run(ctx context.Context, log *logger.Logger) error {
 		Build: tag,
 		Log:   log,
 		BusConfig: mux.BusConfig{
-			UserBus: userBus,
+			AuditBus: auditBus,
+			UserBus:  userBus,
+		},
+		IngestorConfig: mux.IngestorConfig{
+			AuthClient: authClient,
+		},
+		AuthConfig: mux.AuthConfig{
+			Auth: ath,
 		},
 	}
 

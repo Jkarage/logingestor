@@ -1,7 +1,6 @@
 package userdb
 
 import (
-	"database/sql"
 	"fmt"
 	"net/mail"
 	"time"
@@ -14,12 +13,12 @@ import (
 )
 
 type userDB struct {
-	ID           uuid.UUID      `db:"user_id"`
+	ID           uuid.UUID      `db:"id"`
 	Name         string         `db:"name"`
 	Email        string         `db:"email"`
 	Roles        dbarray.String `db:"roles"`
 	PasswordHash []byte         `db:"password_hash"`
-	Department   sql.NullString `db:"department"`
+	OrgIDs       []uuid.UUID    `db:"org_ids"`
 	Enabled      bool           `db:"enabled"`
 	DateCreated  time.Time      `db:"date_created"`
 	DateUpdated  time.Time      `db:"date_updated"`
@@ -32,7 +31,6 @@ func toDBUser(bus userbus.User) userDB {
 		Email:        bus.Email.Address,
 		Roles:        role.ParseToString(bus.Roles),
 		PasswordHash: bus.PasswordHash,
-		Department:   name.ToSQLNullString(bus.Department),
 		Enabled:      bus.Enabled,
 		DateCreated:  bus.DateCreated.UTC(),
 		DateUpdated:  bus.DateUpdated.UTC(),
@@ -54,11 +52,6 @@ func toBusUser(db userDB) (userbus.User, error) {
 		return userbus.User{}, fmt.Errorf("parse name: %w", err)
 	}
 
-	department, err := name.ParseNull(db.Department.String)
-	if err != nil {
-		return userbus.User{}, fmt.Errorf("parse department: %w", err)
-	}
-
 	bus := userbus.User{
 		ID:           db.ID,
 		Name:         nme,
@@ -66,7 +59,7 @@ func toBusUser(db userDB) (userbus.User, error) {
 		Roles:        roles,
 		PasswordHash: db.PasswordHash,
 		Enabled:      db.Enabled,
-		Department:   department,
+		OrgIDs:       db.OrgIDs,
 		DateCreated:  db.DateCreated.In(time.Local),
 		DateUpdated:  db.DateUpdated.In(time.Local),
 	}

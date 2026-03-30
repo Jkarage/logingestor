@@ -6,16 +6,18 @@ import (
 
 // These are the current set of rules we have for auth.
 const (
-	RuleAuthenticate   = "auth"
-	RuleAny            = "rule_any"
-	RuleAdminOnly      = "rule_admin_only"
-	RuleUserOnly       = "rule_user_only"
-	RuleAdminOrSubject = "rule_admin_or_subject"
+	RuleAuthenticate       = "auth"
+	RuleAny                = "rule_any"
+	RuleViewerOnly         = "rule_viewer_only"
+	RuleProjectManagerOnly = "rule_project_manager_only"
+	RuleOrgAdminOnly       = "rule_org_admin_only"
+	RuleAdminOnly          = "rule_super_admin_only"
+	RuleAdminOrSubject     = "rule_super_admin_or_subject"
 )
 
 // Package name of our rego code.
 const (
-	opaPackage string = "ardan.rego"
+	opaPackage string = "ingestor.rego"
 )
 
 // Core OPA policies.

@@ -1,12 +1,16 @@
-package ardan.rego
+package ingestor.rego
 
 import rego.v1
 
-role_user := "USER"
+role_viewer := "VIEWER"
 
-role_admin := "ADMIN"
+role_project_manager := "PROJECT MANAGER"
 
-role_all := {role_admin, role_user}
+role_org_admin := "ORG ADMIN"
+
+role_super_admin := "SUPER ADMIN"
+
+role_all := {role_viewer, role_project_manager, role_org_admin, role_super_admin}
 
 default rule_any := false
 
@@ -16,31 +20,47 @@ rule_any if {
 	count(input_roles) > 0
 }
 
-default rule_admin_only := false
+default rule_viewer_only := false
 
-rule_admin_only if {
+rule_viewer_only if {
 	claim_roles := {role | some role in input.Roles}
-	input_admin := {role_admin} & claim_roles
-	count(input_admin) > 0
-}
-
-default rule_user_only := false
-
-rule_user_only if {
-	claim_roles := {role | some role in input.Roles}
-	input_user := {role_user} & claim_roles
+	input_user := {role_viewer} & claim_roles
 	count(input_user) > 0
 }
 
-default rule_admin_or_subject := false
+default rule_project_manager_only := false
 
-rule_admin_or_subject if {
+rule_project_manager_only if {
 	claim_roles := {role | some role in input.Roles}
-	input_admin := {role_admin} & claim_roles
+	input_admin := {role_project_manager} & claim_roles
+	count(input_admin) > 0
+}
+
+default rule_org_admin_only := false
+
+rule_org_admin_only if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_org_admin} & claim_roles
+	count(input_admin) > 0
+}
+
+default rule_super_admin_only := false
+
+rule_super_admin_only if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_super_admin} & claim_roles
+	count(input_admin) > 0
+}
+
+default rule_super_admin_or_subject := false
+
+rule_super_admin_or_subject if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_super_admin} & claim_roles
 	count(input_admin) > 0
 } else if {
 	claim_roles := {role | some role in input.Roles}
-	input_user := {role_user} & claim_roles
+	input_user := {role_super_admin} & claim_roles
 	count(input_user) > 0
 	input.UserID == input.Subject
 }

@@ -15,14 +15,14 @@ import (
 
 // User represents information about an individual user.
 type User struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Email       string   `json:"email"`
-	Roles       []string `json:"roles"`
-	Department  string   `json:"department"`
-	Enabled     bool     `json:"enabled"`
-	DateCreated string   `json:"dateCreated"`
-	DateUpdated string   `json:"dateUpdated"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Email         string   `json:"email"`
+	Roles         []string `json:"roles"`
+	Organizations []string `json:"orgs"`
+	Enabled       bool     `json:"enabled"`
+	DateCreated   string   `json:"dateCreated"`
+	DateUpdated   string   `json:"dateUpdated"`
 }
 
 // Encode implements the encoder interface.
@@ -37,7 +37,6 @@ func toAppUser(bus userbus.User) User {
 		Name:        bus.Name.String(),
 		Email:       bus.Email.Address,
 		Roles:       role.ParseToString(bus.Roles),
-		Department:  bus.Department.String(),
 		Enabled:     bus.Enabled,
 		DateCreated: bus.DateCreated.Format(time.RFC3339),
 		DateUpdated: bus.DateUpdated.Format(time.RFC3339),
@@ -60,7 +59,6 @@ type NewUser struct {
 	Name            string   `json:"name"`
 	Email           string   `json:"email"`
 	Roles           []string `json:"roles"`
-	Department      string   `json:"department"`
 	Password        string   `json:"password"`
 	PasswordConfirm string   `json:"passwordConfirm"`
 }
@@ -88,11 +86,6 @@ func toBusNewUser(app NewUser) (userbus.NewUser, error) {
 		errors.Add("name", err)
 	}
 
-	department, err := name.ParseNull(app.Department)
-	if err != nil {
-		errors.Add("department", err)
-	}
-
 	pass, err := password.ParseConfirm(app.Password, app.PasswordConfirm)
 	if err != nil {
 		errors.Add("password", err)
@@ -103,11 +96,10 @@ func toBusNewUser(app NewUser) (userbus.NewUser, error) {
 	}
 
 	bus := userbus.NewUser{
-		Name:       nme,
-		Email:      *addr,
-		Roles:      roles,
-		Department: department,
-		Password:   pass,
+		Name:     nme,
+		Email:    *addr,
+		Roles:    roles,
+		Password: pass,
 	}
 
 	return bus, nil
@@ -154,7 +146,6 @@ func toBusUpdateUserRole(app UpdateUserRole) (userbus.UpdateUser, error) {
 type UpdateUser struct {
 	Name            *string `json:"name"`
 	Email           *string `json:"email"`
-	Department      *string `json:"department"`
 	Password        *string `json:"password"`
 	PasswordConfirm *string `json:"passwordConfirm"`
 	Enabled         *bool   `json:"enabled"`
@@ -168,15 +159,6 @@ func (app *UpdateUser) Decode(data []byte) error {
 func toBusUpdateUser(app UpdateUser) (userbus.UpdateUser, error) {
 	var errors errs.FieldErrors
 
-	var addr *mail.Address
-	if app.Email != nil {
-		var err error
-		addr, err = mail.ParseAddress(*app.Email)
-		if err != nil {
-			errors.Add("email", err)
-		}
-	}
-
 	var nme *name.Name
 	if app.Name != nil {
 		nm, err := name.Parse(*app.Name)
@@ -184,15 +166,6 @@ func toBusUpdateUser(app UpdateUser) (userbus.UpdateUser, error) {
 			errors.Add("name", err)
 		}
 		nme = &nm
-	}
-
-	var department *name.Null
-	if app.Department != nil {
-		dep, err := name.ParseNull(*app.Department)
-		if err != nil {
-			errors.Add("department", err)
-		}
-		department = &dep
 	}
 
 	var pass *password.Password
@@ -207,11 +180,9 @@ func toBusUpdateUser(app UpdateUser) (userbus.UpdateUser, error) {
 	}
 
 	bus := userbus.UpdateUser{
-		Name:       nme,
-		Email:      addr,
-		Department: department,
-		Password:   pass,
-		Enabled:    app.Enabled,
+		Name:     nme,
+		Password: pass,
+		Enabled:  app.Enabled,
 	}
 
 	return bus, nil

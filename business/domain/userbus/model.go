@@ -17,7 +17,7 @@ type User struct {
 	Email        mail.Address
 	Roles        []role.Role
 	PasswordHash []byte
-	Department   name.Null
+	OrgIDs       []uuid.UUID
 	Enabled      bool
 	DateCreated  time.Time
 	DateUpdated  time.Time
@@ -25,19 +25,27 @@ type User struct {
 
 // NewUser contains information needed to create a new user.
 type NewUser struct {
-	Name       name.Name
-	Email      mail.Address
-	Roles      []role.Role
-	Department name.Null
-	Password   password.Password
+	Name     name.Name
+	Email    mail.Address
+	Roles    []role.Role
+	Password password.Password
 }
 
 // UpdateUser contains information needed to update a user.
 type UpdateUser struct {
-	Name       *name.Name
-	Email      *mail.Address
-	Roles      []role.Role
-	Department *name.Null
-	Password   *password.Password
-	Enabled    *bool
+	Name     *name.Name
+	Email    *mail.Address
+	Roles    []role.Role
+	OrgIds   []uuid.UUID
+	Password *password.Password
+	Enabled  *bool
+}
+
+type ConfirmUser struct {
+	ID    uuid.UUID
+	Email *mail.Address
+}
+
+type ConfirmationToken struct {
+	Token string `json:"token"`
 }

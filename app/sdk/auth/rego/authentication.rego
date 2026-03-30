@@ -1,4 +1,4 @@
-package ardan.rego
+package ingestor.rego
 
 import rego.v1
 

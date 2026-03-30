@@ -1,13 +1,10 @@
-run:
-	go run api/services/INGESTOR/main.go | go run api/tooling/logfmt/main.go
-
 # Vendor 
 tidy:
 	go mod tidy
 	go mod vendor
 
 pgcli:
-	pgcli postgres://postgres:postgres@12.13.14.15:5432
+	pgcli postgres://postgres:Hu88e1na%408@46.62.196.184:5432
 
 
 # ==============================================================================
@@ -20,10 +17,10 @@ run-auth:
 	go run api/services/auth/main.go | go run api/tooling/logfmt/main.go
 
 run:
-	go run api/services/sales/main.go | go run api/tooling/logfmt/main.go
+	go run api/services/ingestor/main.go | go run api/tooling/logfmt/main.go
 
 run-help:
-	go run api/services/sales/main.go --help | go run api/tooling/logfmt/main.go
+	go run api/services/ingestor/main.go --help | go run api/tooling/logfmt/main.go
 
 curl:
 	curl -i http://localhost:3000/v1/hack

@@ -21,11 +21,10 @@ func TestNewUsers(n int, rle role.Role) []NewUser {
 		idx++
 
 		nu := NewUser{
-			Name:       name.MustParse(fmt.Sprintf("Name%d", idx)),
-			Email:      mail.Address{Address: fmt.Sprintf("Email%d@gmail.com", idx)},
-			Roles:      []role.Role{rle},
-			Department: name.MustParseNull(fmt.Sprintf("Department%d", idx)),
-			Password:   password.MustParse(fmt.Sprintf("Password%d", idx)),
+			Name:     name.MustParse(fmt.Sprintf("Name%d", idx)),
+			Email:    mail.Address{Address: fmt.Sprintf("Email%d@gmail.com", idx)},
+			Roles:    []role.Role{rle},
+			Password: password.MustParse(fmt.Sprintf("Password%d", idx)),
 		}
 
 		newUsrs[i] = nu

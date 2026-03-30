@@ -110,7 +110,6 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, nu NewUser) (U
 		Email:        nu.Email,
 		PasswordHash: hash,
 		Roles:        nu.Roles,
-		Department:   nu.Department,
 		Enabled:      true,
 		DateCreated:  now,
 		DateUpdated:  now,
@@ -144,11 +143,6 @@ func (b *Business) Update(ctx context.Context, actorID uuid.UUID, usr User, uu U
 		}
 		usr.PasswordHash = pw
 	}
-
-	if uu.Department != nil {
-		usr.Department = *uu.Department
-	}
-
 	if uu.Enabled != nil {
 		usr.Enabled = *uu.Enabled
 	}
@@ -227,3 +221,15 @@ func (b *Business) Authenticate(ctx context.Context, email mail.Address, passwor
 
 	return usr, nil
 }
+
+// func (b *Business) Activate(ctx context.Context, claims auth.VerifyClaims) error {
+// 	// Re-fetch user to make sure they exist and aren't already active
+// 	usr, err := b.storer.QueryByID(ctx, claims.UserID)
+// 	if err != nil {
+// 		return fmt.Errorf("querybyid: %w", err)
+// 	}
+// 	if usr.Enabled {
+// 		return errs.New(errs.FailedPrecondition, errors.New("user already active"))
+// 	}
+// 	return b.storer.UpdateEnabled(ctx, claims.UserID, true)
+// }

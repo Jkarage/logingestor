@@ -5,8 +5,10 @@ import "fmt"
 
 // The set of roles that can be used.
 var (
-	Admin = newRole("ADMIN")
-	User  = newRole("USER")
+	Admin      = newRole("SUPER ADMIN")
+	OrgAdmin   = newRole("ORG ADMIN")
+	PrjManager = newRole("PROJECT MANAGER")
+	User       = newRole("VIEWER")
 )
 
 // =============================================================================
@@ -20,8 +22,12 @@ type Role struct {
 }
 
 func newRole(role string) Role {
-	r := Role{role}
+	r := Role{
+		value: role,
+	}
+
 	roles[role] = r
+
 	return r
 }
 

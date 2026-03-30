@@ -29,7 +29,7 @@ func parseQueryParams(r *http.Request) (queryParams, error) {
 		Page:             values.Get("page"),
 		Rows:             values.Get("rows"),
 		OrderBy:          values.Get("orderBy"),
-		ID:               values.Get("user_id"),
+		ID:               values.Get("id"),
 		Name:             values.Get("name"),
 		Email:            values.Get("email"),
 		StartCreatedDate: values.Get("start_created_date"),
@@ -49,7 +49,7 @@ func parseFilter(qp queryParams) (userbus.QueryFilter, error) {
 		case nil:
 			filter.ID = &id
 		default:
-			fieldErrors.Add("user_id", err)
+			fieldErrors.Add("id", err)
 		}
 	}
 

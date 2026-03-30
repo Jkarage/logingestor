@@ -34,5 +34,4 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AuditBus:   cfg.BusConfig.AuditBus,
 		AuthClient: cfg.IngestorConfig.AuthClient,
 	})
-
 }

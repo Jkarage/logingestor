@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
-	"github.com/jkarage/logingestor/api/services/ingestor/build"
+	"github.com/jkarage/logingestor/api/services/auth/build"
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/debug"
 	"github.com/jkarage/logingestor/app/sdk/mux"
@@ -75,17 +75,17 @@ func run(ctx context.Context, log *logger.Logger) error {
 		Auth struct {
 			KeysJSON   string `conf:"mask"`
 			KeysFolder string `conf:"default:zarf/keys/"`
-			ActiveKID  string `conf:"default:54bb2165-71e1-41a6-af3e-7da4a0e1e2c1"`
+			ActiveKID  string `conf:"default:231c6f21-0207-4d5c-bc83-a4fdbd5cb06f"`
 			Issuer     string `conf:"default:service project"`
 		}
 		DB struct {
-			User         string `conf:"default:postgres"`
-			Password     string `conf:"default:postgres,mask"`
-			Host         string `conf:"default:database-service"`
-			Name         string `conf:"default:postgres"`
+			User         string `conf:"default:postgres,env:DB_USERNAME"`
+			Password     string `conf:"default:postgres,env:DB_PASSWORD,mask"`
+			Host         string `conf:"default:12.13.14.15:5432,env:DB_HOST"`
+			Name         string `conf:"default:bsa,env:DB_NAME"`
 			MaxIdleConns int    `conf:"default:0"`
 			MaxOpenConns int    `conf:"default:0"`
-			DisableTLS   bool   `conf:"default:true"`
+			DisableTLS   bool   `conf:"default:false"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
@@ -99,7 +99,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		},
 	}
 
-	const prefix = "AUTH"
+	const prefix = "INGESTOR"
 	help, err := conf.Parse(prefix, &cfg)
 	if err != nil {
 		if errors.Is(err, conf.ErrHelpWanted) {
@@ -223,7 +223,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// -------------------------------------------------------------------------
 	// Start API Service
 
-	log.Info(ctx, "startup", "status", "initializing tracing support")
+	log.Info(ctx, "startup", "status", "initializing V1 API support")
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
@@ -236,7 +236,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		BusConfig: mux.BusConfig{
 			UserBus: userBus,
 		},
-		AuthConfig: mux.AuthConfig{ 
+		AuthConfig: mux.AuthConfig{
 			Auth: ath,
 		},
 	}
@@ -257,6 +257,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 		serverErrors <- api.ListenAndServe()
 	}()
+	// -------------------------------------------------------------------------
+	// Shutdown
 
 	select {
 	case err := <-serverErrors:
