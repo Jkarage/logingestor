@@ -72,7 +72,7 @@ func htmlBody(verifyURL string) string {
           <tr>
             <td style="background-color:#111827;padding:32px 40px;text-align:center;">
               <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;
-                         letter-spacing:-0.5px;">YourApp</h1>
+                         letter-spacing:-0.5px;">Niute</h1>
             </td>
           </tr>
 
@@ -123,7 +123,7 @@ func htmlBody(verifyURL string) string {
           <tr>
             <td style="padding:24px 40px 32px;">
               <p style="margin:0;color:#9ca3af;font-size:12px;line-height:1.6;">
-                If you didn't create an account with YourApp, you can safely ignore
+                If you didn't create an account with Niute, you can safely ignore
                 this email. Someone may have entered your address by mistake.
               </p>
             </td>
