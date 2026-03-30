@@ -131,3 +131,7 @@ func (ext *Extension) QueryByEmail(ctx context.Context, email mail.Address) (use
 func (ext *Extension) Authenticate(ctx context.Context, email mail.Address, password string) (userbus.User, error) {
 	return ext.bus.Authenticate(ctx, email, password)
 }
+
+func (ext *Extension) Activate(ctx context.Context, userID uuid.UUID) error {
+	return ext.bus.Activate(ctx, userID)
+}

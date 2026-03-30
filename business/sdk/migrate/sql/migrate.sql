@@ -1,13 +1,3 @@
---------------------------------------------------------------------------------
--- Version: 1.02
--- Description: Create table products
-CREATE TABLE organizations (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text NOT NULL,
-    slug text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9-]+$'),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
 -- Version: 1.01
 -- Description: Create table users
 CREATE TABLE users (
@@ -23,6 +13,29 @@ CREATE TABLE users (
     PRIMARY KEY (id)
 );
 CREATE INDEX users_email_idx ON users (email);
+-- Version: 1.02
+-- Description: Create table products
+CREATE TABLE organizations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    slug text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9-]+$'),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+-- Version: 1.04
+-- Description: Create table audit
+CREATE TABLE audit (
+    id UUID NOT NULL,
+    obj_id UUID NOT NULL,
+    obj_domain TEXT NOT NULL,
+    obj_name TEXT NOT NULL,
+    actor_id UUID NOT NULL,
+    action TEXT NOT NULL,
+    data JSONB NULL,
+    message TEXT NULL,
+    timestamp TIMESTAMP NOT NULL,
+    PRIMARY KEY (id)
+);
 --------------------------------------------------------------------------------
 -- CREATE TABLE projects (
 --     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

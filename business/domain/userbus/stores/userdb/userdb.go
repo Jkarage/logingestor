@@ -229,3 +229,24 @@ func (s *Store) UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled boo
 	}
 	return nil
 }
+
+func (s *Store) UpdateEnabledX(ctx context.Context, userID uuid.UUID, enabled bool) error {
+	const q = `
+        UPDATE users
+        SET    enabled      = :enabled,
+               date_updated = :date_updated
+        WHERE  id = :id`
+
+	data := struct {
+		UserID  uuid.UUID `db:"user_id"`
+		Enabled bool      `db:"enabled"`
+	}{
+		UserID:  userID,
+		Enabled: enabled,
+	}
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+	return nil
+}

@@ -150,3 +150,8 @@ func (s *Store) deleteCache(bus userbus.User) {
 	s.cache.Delete(bus.ID.String())
 	s.cache.Delete(bus.Email.Address)
 }
+
+func (s *Store) UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error {
+	// Not implemeneted
+	return nil
+}

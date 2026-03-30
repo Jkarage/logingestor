@@ -110,3 +110,10 @@ func (ext *Extension) Authenticate(ctx context.Context, email mail.Address, pass
 
 	return ext.bus.Authenticate(ctx, email, password)
 }
+
+func (ext *Extension) Activate(ctx context.Context, userID uuid.UUID) error {
+	ctx, span := otel.AddSpan(ctx, "business.userbus.authenticate")
+	defer span.End()
+
+	return ext.bus.Activate(ctx, userID)
+}

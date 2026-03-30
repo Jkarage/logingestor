@@ -28,6 +28,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
+	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/keystore"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/otel"
@@ -91,6 +92,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			KeysFolder string `conf:"default:zarf/keys/"`
 			ActiveKID  string `conf:"default:231c6f21-0207-4d5c-bc83-a4fdbd5cb06f"`
 			Issuer     string `conf:"default:confirm mail"`
+		}
+		SendGrid struct {
+			APIKey       string `conf:"default:xxxxxxx,env:SENDGRID_API_KEY"`
+			From         string `conf:"default:xxxxxxx,env:SENDGRID_FROM_EMAIL"`
+			FromName     string `conf:"default:xxxxxxx,env:SENDGRID_FROM_NAME"`
+			EmailBaseURL string `conf:"default:http://localhost:5173,env:SENDGRID_EMAILBASEURL"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
@@ -194,8 +201,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	authCfg := auth.Config{
 		Log:       log,
-		UserBus:   userBus,
 		KeyLookup: ks,
+		UserBus:   userBus,
 		Issuer:    cfg.Auth.Issuer,
 	}
 
@@ -208,6 +215,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}
 
 	defer authClient.Close()
+
+	// -------------------------------------------------------------------------
+	// Email Setup
+	em := emailer.New(cfg.SendGrid.APIKey, cfg.SendGrid.From, cfg.SendGrid.FromName)
 
 	// -------------------------------------------------------------------------
 	// Start Debug Service
@@ -240,6 +251,9 @@ func run(ctx context.Context, log *logger.Logger) error {
 		AuthConfig: mux.AuthConfig{
 			Auth: ath,
 		},
+		EmailConfig:  em,
+		EmailBaseURL: cfg.SendGrid.EmailBaseURL,
+		SigningKey:   cfg.Auth.ActiveKID,
 	}
 
 	webAPI := mux.WebAPI(cfgMux,

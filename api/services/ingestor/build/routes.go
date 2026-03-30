@@ -24,9 +24,13 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	})
 
 	userapp.Routes(app, userapp.Config{
-		Log:        cfg.Log,
-		UserBus:    cfg.BusConfig.UserBus,
-		AuthClient: cfg.IngestorConfig.AuthClient,
+		Log:          cfg.Log,
+		UserBus:      cfg.BusConfig.UserBus,
+		AuthClient:   cfg.IngestorConfig.AuthClient,
+		Auth:         cfg.AuthConfig.Auth,
+		SigningKey:   cfg.SigningKey,
+		EmailBaseURL: cfg.EmailBaseURL,
+		Mailer:       cfg.EmailConfig,
 	})
 
 	auditapp.Routes(app, auditapp.Config{

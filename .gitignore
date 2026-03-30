@@ -21,6 +21,7 @@
 go.work
 zarf/keys/
 private.pem
+public.pem
 .env
 .DS_Store
 

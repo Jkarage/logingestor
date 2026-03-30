@@ -7,15 +7,20 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/userbus"
+	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
-	Log        *logger.Logger
-	UserBus    userbus.ExtBusiness
-	AuthClient authclient.Authenticator
+	EmailBaseURL string
+	SigningKey   string
+	Mailer       *emailer.Config
+	Log          *logger.Logger
+	Auth         *auth.Auth
+	AuthClient   authclient.Authenticator
+	UserBus      userbus.ExtBusiness
 }
 
 // Routes adds specific routes for this group.
@@ -27,7 +32,7 @@ func Routes(app *web.App, cfg Config) {
 	ruleAuthorizeUser := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOrSubject)
 	ruleAuthorizeAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOnly)
 
-	api := newApp(cfg.UserBus)
+	api := newApp(cfg.EmailBaseURL, cfg.SigningKey, cfg.Mailer, cfg.UserBus, cfg.Auth)
 
 	app.HandlerFunc(http.MethodGet, version, "/users", api.query, authen, ruleSuperAdmin)
 	app.HandlerFunc(http.MethodGet, version, "/users/{user_id}", api.queryByID, authen, ruleAuthorizeUser)
@@ -35,4 +40,5 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodPut, version, "/users/role/{user_id}", api.updateRole, authen, ruleAuthorizeAdmin)
 	app.HandlerFunc(http.MethodPut, version, "/users/{user_id}", api.update, authen, ruleAuthorizeUser)
 	app.HandlerFunc(http.MethodDelete, version, "/users/{user_id}", api.delete, authen, ruleAuthorizeUser)
+	app.HandlerFunc(http.MethodPost, version, "/users/verify", api.verify)
 }

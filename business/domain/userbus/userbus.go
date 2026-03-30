@@ -35,6 +35,7 @@ type Storer interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
+	UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra functionality
@@ -49,6 +50,7 @@ type ExtBusiness interface {
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 	Authenticate(ctx context.Context, email mail.Address, password string) (User, error)
+	Activate(ctx context.Context, userID uuid.UUID) error
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -110,7 +112,7 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, nu NewUser) (U
 		Email:        nu.Email,
 		PasswordHash: hash,
 		Roles:        nu.Roles,
-		Enabled:      true,
+		Enabled:      false,
 		DateCreated:  now,
 		DateUpdated:  now,
 	}
@@ -222,14 +224,23 @@ func (b *Business) Authenticate(ctx context.Context, email mail.Address, passwor
 	return usr, nil
 }
 
-// func (b *Business) Activate(ctx context.Context, claims auth.VerifyClaims) error {
-// 	// Re-fetch user to make sure they exist and aren't already active
-// 	usr, err := b.storer.QueryByID(ctx, claims.UserID)
-// 	if err != nil {
-// 		return fmt.Errorf("querybyid: %w", err)
-// 	}
-// 	if usr.Enabled {
-// 		return errs.New(errs.FailedPrecondition, errors.New("user already active"))
-// 	}
-// 	return b.storer.UpdateEnabled(ctx, claims.UserID, true)
-// }
+// Activate sets enabled=true after email verification.
+// Token validation already happened in the handler — by the time
+// this is called the userID is trusted.
+func (b *Business) Activate(ctx context.Context, userID uuid.UUID) error {
+	usr, err := b.storer.QueryByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("querybyid userID[%s]: %w", userID, err)
+	}
+
+	// Idempotent — clicking the link twice is not an error.
+	if usr.Enabled {
+		return nil
+	}
+
+	if err := b.storer.UpdateEnabled(ctx, userID, true); err != nil {
+		return fmt.Errorf("update enabled userID[%s]: %w", userID, err)
+	}
+
+	return nil
+}

@@ -221,3 +221,50 @@ func (a *Auth) isUserEnabled(ctx context.Context, claims Claims) error {
 
 	return nil
 }
+
+// app/sdk/auth/auth.go
+
+// VerifyClaims is used ONLY for email verification links.
+// Kept separate from Claims so a verify token can never be
+// accepted where a session token is expected.
+type VerifyClaims struct {
+	jwt.RegisteredClaims
+	Email string `json:"email"`
+}
+
+// ParseVerifyToken validates and parses an email verification token.
+func (a *Auth) ParseVerifyToken(ctx context.Context, tokenStr string) (Claims, error) {
+	var claims Claims
+	token, _, err := a.parser.ParseUnverified(tokenStr, &claims)
+	if err != nil {
+		return Claims{}, fmt.Errorf("error parsing token: %w", err)
+	}
+
+	kidRaw, exists := token.Header["kid"]
+	if !exists {
+		return Claims{}, ErrKIDMissing
+	}
+
+	kid, ok := kidRaw.(string)
+	if !ok {
+		return Claims{}, ErrKIDMalformed
+	}
+
+	pem, err := a.keyLookup.PublicKey(kid)
+	if err != nil {
+		return Claims{}, fmt.Errorf("fetching public key for kid %q: %w", kid, err)
+	}
+
+	input := map[string]any{
+		"Key":   pem,
+		"Token": tokenStr,
+		"ISS":   a.issuer,
+	}
+
+	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input, ErrInvalidAuthOPA); err != nil {
+		a.log.Info(ctx, "**Authenticate-FAILED**", "token", tokenStr, "userID", claims.Subject)
+		return Claims{}, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	return claims, nil
+}

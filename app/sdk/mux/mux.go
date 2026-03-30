@@ -11,6 +11,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
+	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 	"github.com/jmoiron/sqlx"
@@ -74,6 +75,9 @@ type Config struct {
 	BusConfig      BusConfig
 	IngestorConfig IngestorConfig
 	AuthConfig     AuthConfig
+	EmailConfig    *emailer.Config
+	EmailBaseURL   string
+	SigningKey     string
 }
 
 // RouteAdder defines behavior that sets the routes to bind for an instance

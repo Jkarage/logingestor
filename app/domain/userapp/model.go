@@ -187,3 +187,12 @@ func toBusUpdateUser(app UpdateUser) (userbus.UpdateUser, error) {
 
 	return bus, nil
 }
+
+type ConfirmUser struct {
+	Token string `json:"token"`
+}
+
+// Decode implements the decoder interface.
+func (app *ConfirmUser) Decode(data []byte) error {
+	return json.Unmarshal(data, app)
+}

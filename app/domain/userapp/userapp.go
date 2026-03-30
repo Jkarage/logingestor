@@ -4,24 +4,38 @@ package userapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
+	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
+	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/app/sdk/query"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
+	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
 type app struct {
-	userBus userbus.ExtBusiness
+	emailBaseURL string
+	userBus      userbus.ExtBusiness
+	auth         *auth.Auth
+	mailer       *emailer.Config
+	signingKey   string
 }
 
-func newApp(userBus userbus.ExtBusiness) *app {
+func newApp(emailBaseURL, signingKey string, mailer *emailer.Config, userBus userbus.ExtBusiness, auth *auth.Auth) *app {
 	return &app{
-		userBus: userBus,
+		userBus:      userBus,
+		auth:         auth,
+		emailBaseURL: emailBaseURL,
+		signingKey:   signingKey,
+		mailer:       mailer,
 	}
 }
 
@@ -36,12 +50,33 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
+	// Create user — enabled=false inside userbus.Create
 	usr, err := a.userBus.Create(ctx, mid.GetSubjectID(ctx), nc)
 	if err != nil {
 		if errors.Is(err, userbus.ErrUniqueEmail) {
 			return errs.New(errs.Aborted, userbus.ErrUniqueEmail)
 		}
 		return errs.Errorf(errs.Internal, "create: usr[%+v]: %s", usr, err)
+	}
+
+	// Generate verify token
+	token, err := a.auth.GenerateToken(a.signingKey, auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   usr.ID.String(),
+			Issuer:    a.auth.Issuer(),
+			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(24 * time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
+		},
+	})
+	if err != nil {
+		return errs.New(errs.Internal, err)
+	}
+	// Build the frontend link — frontend extracts ?token and POSTs it back
+	link := a.emailBaseURL + "/verify?token=" + token
+
+	// Send email
+	if err := a.mailer.SendVerification(usr.Email.Address, usr.Name.String(), link); err != nil {
+		return errs.New(errs.Internal, err)
 	}
 
 	return toAppUser(usr)
@@ -149,4 +184,31 @@ func (a *app) queryByID(ctx context.Context, _ *http.Request) web.Encoder {
 	}
 
 	return toAppUser(usr)
+}
+
+func (a *app) verify(ctx context.Context, r *http.Request) web.Encoder {
+	var cu ConfirmUser
+	if err := web.Decode(r, &cu); err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	}
+
+	// Authenticate parses the token, checks the signature using the public key
+	// matched by kid in the header, validates expiry + issuer, returns Claims.
+	claims, err := a.auth.ParseVerifyToken(context.Background(), cu.Token)
+	if err != nil {
+		return errs.New(errs.Internal, err)
+	}
+	userID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	}
+
+	fmt.Println("userID", userID)
+
+	// Flip enabled=true in DB
+	if err := a.userBus.Activate(ctx, userID); err != nil {
+		return errs.New(errs.Internal, err)
+	}
+
+	return nil
 }
