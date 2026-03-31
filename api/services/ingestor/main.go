@@ -21,10 +21,18 @@ import (
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
+	"github.com/jkarage/logingestor/business/domain/invitationbus"
+	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationaudit"
+	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationotel"
+	"github.com/jkarage/logingestor/business/domain/invitationbus/stores/invitationdb"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgaudit"
 	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgotel"
 	"github.com/jkarage/logingestor/business/domain/orgbus/stores/orgdb"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectaudit"
+	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectotel"
+	"github.com/jkarage/logingestor/business/domain/projectbus/stores/projectdb"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/useraudit"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
@@ -183,6 +191,16 @@ func run(ctx context.Context, log *logger.Logger) error {
 	orgStorage := orgdb.NewStore(log, db)
 	orgBus := orgbus.NewBusiness(log, delegate, orgStorage, orgOtelExt, orgAuditExt)
 
+	projectOtelExt := projectotel.NewExtension()
+	projectAuditExt := projectaudit.NewExtension(auditBus)
+	projectStorage := projectdb.NewStore(log, db)
+	projectBus := projectbus.NewBusiness(log, delegate, projectStorage, projectOtelExt, projectAuditExt)
+
+	invitationOtelExt := invitationotel.NewExtension()
+	invitationAuditExt := invitationaudit.NewExtension(auditBus)
+	invitationStorage := invitationdb.NewStore(log, db)
+	invitationBus := invitationbus.NewBusiness(log, delegate, invitationStorage, invitationOtelExt, invitationAuditExt)
+
 	// -------------------------------------------------------------------------
 	// Initialize authentication support
 	log.Info(ctx, "startup", "status", "initializing authentication support")
@@ -246,9 +264,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 		Build: tag,
 		Log:   log,
 		BusConfig: mux.BusConfig{
-			AuditBus: auditBus,
-			UserBus:  userBus,
-			OrgBus:   orgBus,
+			AuditBus:      auditBus,
+			UserBus:       userBus,
+			OrgBus:        orgBus,
+			ProjectBus:    projectBus,
+			InvitationBus: invitationBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

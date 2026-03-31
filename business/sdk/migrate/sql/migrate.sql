@@ -146,3 +146,23 @@ CREATE TABLE IF NOT EXISTS user_project_access (
     CONSTRAINT upa_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS upa_project_idx ON user_project_access (project_id);
+-- =========================================================
+-- Version: 1.11
+-- Description: Create org_invitations table
+-- =========================================================
+CREATE TABLE IF NOT EXISTS org_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    email TEXT NOT NULL,
+    role org_role NOT NULL DEFAULT 'VIEWER',
+    token TEXT NOT NULL UNIQUE,
+    invited_by UUID NOT NULL,
+    project_ids TEXT [] NOT NULL DEFAULT '{}',
+    accepted_at TIMESTAMPTZ NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT org_invitations_org_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT org_invitations_user_fk FOREIGN KEY (invited_by) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS org_invitations_org_idx ON org_invitations(org_id);
+CREATE INDEX IF NOT EXISTS org_invitations_email_idx ON org_invitations(email);

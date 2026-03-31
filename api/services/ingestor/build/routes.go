@@ -3,6 +3,7 @@ package build
 import (
 	"github.com/jkarage/logingestor/app/domain/auditapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
+	"github.com/jkarage/logingestor/app/domain/invitationapp"
 	"github.com/jkarage/logingestor/app/domain/orgapp"
 	"github.com/jkarage/logingestor/app/domain/projectapp"
 	"github.com/jkarage/logingestor/app/domain/userapp"
@@ -55,5 +56,18 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		UserBus:    cfg.BusConfig.UserBus,
 		ProjectBus: cfg.BusConfig.ProjectBus,
+	})
+
+	invitationapp.Routes(app, invitationapp.Config{
+		Log:           cfg.Log,
+		Auth:          cfg.AuthConfig.Auth,
+		AuthClient:    cfg.IngestorConfig.AuthClient,
+		UserBus:       cfg.BusConfig.UserBus,
+		OrgBus:        cfg.BusConfig.OrgBus,
+		ProjectBus:    cfg.BusConfig.ProjectBus,
+		InvitationBus: cfg.BusConfig.InvitationBus,
+		Mailer:        cfg.EmailConfig,
+		EmailBaseURL:  cfg.EmailBaseURL,
+		SigningKey:    cfg.SigningKey,
 	})
 }

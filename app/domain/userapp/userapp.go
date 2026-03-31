@@ -44,6 +44,18 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
+	// If an invite token is present, validate it before creating the user.
+	// The email in the token must match the email in the request body.
+	if app.InviteToken != "" {
+		claims, err := a.auth.ParseInviteToken(context.Background(), app.InviteToken)
+		if err != nil {
+			return errs.New(errs.Unauthenticated, err)
+		}
+		if claims.Email != app.Email {
+			return errs.New(errs.InvalidArgument, errors.New("email does not match invite"))
+		}
+	}
+
 	nc, err := toBusNewUser(app)
 	if err != nil {
 		return errs.New(errs.InvalidArgument, err)
@@ -58,7 +70,18 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "create: usr[%+v]: %s", usr, err)
 	}
 
-	// Generate verify token
+	// Invite path: activate immediately, no email confirmation needed.
+	// The frontend calls POST /v1/invitations/accept with the same token
+	// after this to complete the org join.
+	if app.InviteToken != "" {
+		if err := a.userBus.Activate(ctx, usr.ID); err != nil {
+			return errs.Errorf(errs.Internal, "activate invited user: %s", err)
+		}
+		usr.Enabled = true
+		return toAppUser(usr)
+	}
+
+	// Normal path: generate a verify token and send confirmation email.
 	token, err := a.auth.GenerateToken(a.signingKey, auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   usr.ID.String(),
@@ -70,10 +93,9 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	if err != nil {
 		return errs.New(errs.Internal, err)
 	}
-	// Build the frontend link — frontend extracts ?token and POSTs it back
+
 	link := a.emailBaseURL + "/verify?token=" + token
 
-	// Send email
 	if err := a.mailer.SendVerification(usr.Email.Address, usr.Name.String(), link); err != nil {
 		return errs.New(errs.Internal, err)
 	}

@@ -61,6 +61,7 @@ type NewUser struct {
 	Roles           []string `json:"roles"`
 	Password        string   `json:"password"`
 	PasswordConfirm string   `json:"passwordConfirm"`
+	InviteToken     string   `json:"inviteToken"`
 }
 
 // Decode implements the decoder interface.

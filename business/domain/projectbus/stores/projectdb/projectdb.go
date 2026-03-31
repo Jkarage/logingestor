@@ -173,6 +173,29 @@ func (s *Store) QueryByID(ctx context.Context, projectID uuid.UUID) (projectbus.
 	return toBusProject(dbProject), nil
 }
 
+// GrantProjectAccess inserts a row into user_project_access. Duplicate grants
+// are silently ignored via ON CONFLICT DO NOTHING.
+func (s *Store) GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error {
+	data := struct {
+		UserID    string `db:"user_id"`
+		ProjectID string `db:"project_id"`
+	}{
+		UserID:    userID.String(),
+		ProjectID: projectID.String(),
+	}
+
+	const q = `
+	INSERT INTO user_project_access (user_id, project_id)
+	VALUES (:user_id, :project_id)
+	ON CONFLICT DO NOTHING`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
 // QueryAccessible returns only the projects within an org that the given user can see.
 func (s *Store) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
 	data := struct {

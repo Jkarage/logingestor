@@ -116,3 +116,8 @@ func (ext *Extension) QueryByID(ctx context.Context, projectID uuid.UUID) (proje
 func (ext *Extension) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
 	return ext.bus.QueryAccessible(ctx, orgID, userID)
 }
+
+// GrantProjectAccess does not apply auditing.
+func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error {
+	return ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID)
+}

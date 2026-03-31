@@ -76,3 +76,10 @@ func (ext *Extension) QueryAccessible(ctx context.Context, orgID uuid.UUID, user
 
 	return ext.bus.QueryAccessible(ctx, orgID, userID)
 }
+
+func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error {
+	ctx, span := otel.AddSpan(ctx, "business.projectbus.grantprojectaccess")
+	defer span.End()
+
+	return ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID)
+}

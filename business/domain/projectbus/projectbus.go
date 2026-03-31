@@ -33,6 +33,7 @@ type Storer interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, projectID uuid.UUID) (Project, error)
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
+	GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -47,6 +48,7 @@ type ExtBusiness interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, projectID uuid.UUID) (Project, error)
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
+	GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -170,4 +172,14 @@ func (b *Business) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID 
 		return nil, fmt.Errorf("queryaccessible: %w", err)
 	}
 	return projects, nil
+}
+
+// GrantProjectAccess inserts a row into user_project_access so the user can
+// see the specified project. It is idempotent — granting access twice is not
+// an error.
+func (b *Business) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error {
+	if err := b.storer.GrantProjectAccess(ctx, userID, projectID); err != nil {
+		return fmt.Errorf("grantprojectaccess: %w", err)
+	}
+	return nil
 }

@@ -232,6 +232,87 @@ type VerifyClaims struct {
 	Email string `json:"email"`
 }
 
+// InviteTokenType is the value set in InviteClaims.Type so invite tokens
+// cannot be used where session or verify tokens are expected.
+const InviteTokenType = "invite"
+
+// InviteClaims carries the payload embedded in an org invitation JWT.
+// Using a distinct Type field prevents cross-use with session tokens
+// (which have no Type field and therefore never equal "invite").
+type InviteClaims struct {
+	jwt.RegisteredClaims
+	Type       string   `json:"type"`
+	OrgID      string   `json:"org_id"`
+	InviteID   string   `json:"invite_id"`
+	Email      string   `json:"email"`
+	Role       string   `json:"role"`
+	ProjectIDs []string `json:"project_ids,omitempty"`
+}
+
+// GenerateInviteToken signs an InviteClaims JWT using the same key store.
+func (a *Auth) GenerateInviteToken(kid string, claims InviteClaims) (string, error) {
+	token := jwt.NewWithClaims(a.method, claims)
+	token.Header["kid"] = kid
+
+	privateKeyPEM, err := a.keyLookup.PrivateKey(kid)
+	if err != nil {
+		return "", fmt.Errorf("private key: %w", err)
+	}
+
+	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKeyPEM))
+	if err != nil {
+		return "", fmt.Errorf("parsing private key from PEM: %w", err)
+	}
+
+	str, err := token.SignedString(privateKey)
+	if err != nil {
+		return "", fmt.Errorf("signing token: %w", err)
+	}
+
+	return str, nil
+}
+
+// ParseInviteToken validates and parses an org invitation token.
+// It rejects tokens that do not have Type == "invite".
+func (a *Auth) ParseInviteToken(ctx context.Context, tokenStr string) (InviteClaims, error) {
+	var claims InviteClaims
+	token, _, err := a.parser.ParseUnverified(tokenStr, &claims)
+	if err != nil {
+		return InviteClaims{}, fmt.Errorf("error parsing token: %w", err)
+	}
+
+	kidRaw, exists := token.Header["kid"]
+	if !exists {
+		return InviteClaims{}, ErrKIDMissing
+	}
+
+	kid, ok := kidRaw.(string)
+	if !ok {
+		return InviteClaims{}, ErrKIDMalformed
+	}
+
+	pem, err := a.keyLookup.PublicKey(kid)
+	if err != nil {
+		return InviteClaims{}, fmt.Errorf("fetching public key for kid %q: %w", kid, err)
+	}
+
+	input := map[string]any{
+		"Key":   pem,
+		"Token": tokenStr,
+		"ISS":   a.issuer,
+	}
+
+	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input, ErrInvalidAuthOPA); err != nil {
+		return InviteClaims{}, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if claims.Type != InviteTokenType {
+		return InviteClaims{}, errors.New("token is not an invite token")
+	}
+
+	return claims, nil
+}
+
 // ParseVerifyToken validates and parses an email verification token.
 func (a *Auth) ParseVerifyToken(ctx context.Context, tokenStr string) (Claims, error) {
 	var claims Claims
