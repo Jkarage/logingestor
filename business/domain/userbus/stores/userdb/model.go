@@ -18,7 +18,6 @@ type userDB struct {
 	Email        string         `db:"email"`
 	Roles        dbarray.String `db:"roles"`
 	PasswordHash []byte         `db:"password_hash"`
-	OrgIDs       []uuid.UUID    `db:"org_ids"`
 	Enabled      bool           `db:"enabled"`
 	DateCreated  time.Time      `db:"date_created"`
 	DateUpdated  time.Time      `db:"date_updated"`
@@ -59,7 +58,6 @@ func toBusUser(db userDB) (userbus.User, error) {
 		Roles:        roles,
 		PasswordHash: db.PasswordHash,
 		Enabled:      db.Enabled,
-		OrgIDs:       db.OrgIDs,
 		DateCreated:  db.DateCreated.In(time.Local),
 		DateUpdated:  db.DateUpdated.In(time.Local),
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/logger"
@@ -62,8 +64,10 @@ type AuthConfig struct {
 }
 
 type BusConfig struct {
-	UserBus  userbus.ExtBusiness
-	AuditBus auditbus.ExtBusiness
+	UserBus    userbus.ExtBusiness
+	OrgBus     orgbus.ExtBusiness
+	AuditBus   auditbus.ExtBusiness
+	ProjectBus projectbus.ExtBusiness
 }
 
 // Config contains all the mandatory systems required by handlers.

@@ -8,6 +8,8 @@ var (
 	User    = newDomain("USER")
 	Product = newDomain("PRODUCT")
 	Home    = newDomain("HOME")
+	Org     = newDomain("ORG")
+	Project = newDomain("PROJECT")
 )
 
 // =============================================================================

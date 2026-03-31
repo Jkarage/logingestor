@@ -28,13 +28,14 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
-	ruleSuperAdmin := mid.Authorize(cfg.AuthClient, auth.RuleAdminOnly)
+	_ = mid.Authorize(cfg.AuthClient, auth.RuleAdminOnly)
 	ruleAuthorizeUser := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOrSubject)
 	ruleAuthorizeAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOnly)
 
 	api := newApp(cfg.EmailBaseURL, cfg.SigningKey, cfg.Mailer, cfg.UserBus, cfg.Auth)
 
-	app.HandlerFunc(http.MethodGet, version, "/users", api.query, authen, ruleSuperAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/users", api.query)
+	app.HandlerFunc(http.MethodGet, version, "/users/me", api.queryMe, authen)
 	app.HandlerFunc(http.MethodGet, version, "/users/{user_id}", api.queryByID, authen, ruleAuthorizeUser)
 	app.HandlerFunc(http.MethodPost, version, "/users", api.create)
 	app.HandlerFunc(http.MethodPut, version, "/users/role/{user_id}", api.updateRole, authen, ruleAuthorizeAdmin)

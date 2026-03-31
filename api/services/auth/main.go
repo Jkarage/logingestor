@@ -85,7 +85,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Name         string `conf:"default:bsa,env:DB_NAME"`
 			MaxIdleConns int    `conf:"default:0"`
 			MaxOpenConns int    `conf:"default:0"`
-			DisableTLS   bool   `conf:"default:false"`
+			DisableTLS   bool   `conf:"default:true"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`

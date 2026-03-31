@@ -75,7 +75,6 @@ func (s *Store) Update(ctx context.Context, usr userbus.User) error {
 		"email" = :email,
 		"roles" = :roles,
 		"password_hash" = :password_hash,
-		"department" = :department,
 		"enabled" = :enabled,
 		"date_updated" = :date_updated
 	WHERE
@@ -213,40 +212,4 @@ func (s *Store) QueryByEmail(ctx context.Context, email mail.Address) (userbus.U
 	}
 
 	return toBusUser(dbUsr)
-}
-
-// Add to the Update model or create a targeted query
-func (s *Store) UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error {
-	const q = `
-	UPDATE 
-		users 
-	SET 
-		enabled = :enabled
-	WHERE 
-		id = :id`
-	if _, err := s.db.ExecContext(ctx, q, enabled, userID); err != nil {
-		return fmt.Errorf("execcontext: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) UpdateEnabledX(ctx context.Context, userID uuid.UUID, enabled bool) error {
-	const q = `
-        UPDATE users
-        SET    enabled      = :enabled,
-               date_updated = :date_updated
-        WHERE  id = :id`
-
-	data := struct {
-		UserID  uuid.UUID `db:"user_id"`
-		Enabled bool      `db:"enabled"`
-	}{
-		UserID:  userID,
-		Enabled: enabled,
-	}
-
-	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
-		return fmt.Errorf("namedexeccontext: %w", err)
-	}
-	return nil
 }

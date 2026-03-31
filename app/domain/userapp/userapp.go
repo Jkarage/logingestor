@@ -4,7 +4,6 @@ package userapp
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -177,6 +176,20 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	return query.NewResult(toAppUsers(usrs), total, page)
 }
 
+func (a *app) queryMe(ctx context.Context, _ *http.Request) web.Encoder {
+	userID := mid.GetSubjectID(ctx)
+
+	usr, err := a.userBus.QueryByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, userbus.ErrNotFound) {
+			return errs.New(errs.NotFound, err)
+		}
+		return errs.Errorf(errs.Internal, "queryme: userID[%s]: %s", userID, err)
+	}
+
+	return toAppUser(usr)
+}
+
 func (a *app) queryByID(ctx context.Context, _ *http.Request) web.Encoder {
 	usr, err := mid.GetUser(ctx)
 	if err != nil {
@@ -202,8 +215,6 @@ func (a *app) verify(ctx context.Context, r *http.Request) web.Encoder {
 	if err != nil {
 		return errs.New(errs.InvalidArgument, err)
 	}
-
-	fmt.Println("userID", userID)
 
 	// Flip enabled=true in DB
 	if err := a.userBus.Activate(ctx, userID); err != nil {

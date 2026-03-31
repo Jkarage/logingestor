@@ -21,6 +21,10 @@ import (
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
+	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgaudit"
+	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgotel"
+	"github.com/jkarage/logingestor/business/domain/orgbus/stores/orgdb"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/useraudit"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
@@ -85,7 +89,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Name         string `conf:"default:bsa,env:DB_NAME"`
 			MaxIdleConns int    `conf:"default:0"`
 			MaxOpenConns int    `conf:"default:0"`
-			DisableTLS   bool   `conf:"default:false"`
+			DisableTLS   bool   `conf:"default:true"`
 		}
 		Auth struct {
 			Host       string `conf:"default:http://localhost:6000"`
@@ -174,6 +178,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 	userStorage := usercache.NewStore(log, userdb.NewStore(log, db), time.Minute)
 	userBus := userbus.NewBusiness(log, delegate, userStorage, userOtelExt, userAuditExt)
 
+	orgOtelExt := orgotel.NewExtension()
+	orgAuditExt := orgaudit.NewExtension(auditBus)
+	orgStorage := orgdb.NewStore(log, db)
+	orgBus := orgbus.NewBusiness(log, delegate, orgStorage, orgOtelExt, orgAuditExt)
+
 	// -------------------------------------------------------------------------
 	// Initialize authentication support
 	log.Info(ctx, "startup", "status", "initializing authentication support")
@@ -184,11 +193,6 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// concern.
 
 	ks := keystore.New()
-
-	// n1, err := ks.LoadByJSON(cfg.Auth.KeysJSON)
-	// if err != nil {
-	// 	return fmt.Errorf("loading keys by env: %w", err)
-	// }
 
 	n, err := ks.LoadByFileSystem(os.DirFS(cfg.Auth.KeysFolder))
 	if err != nil {
@@ -244,6 +248,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		BusConfig: mux.BusConfig{
 			AuditBus: auditBus,
 			UserBus:  userBus,
+			OrgBus:   orgBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

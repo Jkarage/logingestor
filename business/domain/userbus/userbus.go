@@ -35,7 +35,7 @@ type Storer interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
-	UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error
+	// UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra functionality
@@ -238,7 +238,9 @@ func (b *Business) Activate(ctx context.Context, userID uuid.UUID) error {
 		return nil
 	}
 
-	if err := b.storer.UpdateEnabled(ctx, userID, true); err != nil {
+	usr.Enabled = true
+
+	if err := b.storer.Update(ctx, usr); err != nil {
 		return fmt.Errorf("update enabled userID[%s]: %w", userID, err)
 	}
 

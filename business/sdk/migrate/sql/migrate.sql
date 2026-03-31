@@ -36,106 +36,113 @@ CREATE TABLE audit (
     timestamp TIMESTAMP NOT NULL,
     PRIMARY KEY (id)
 );
---------------------------------------------------------------------------------
--- CREATE TABLE projects (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
---     name text NOT NULL,
---     color text NOT NULL DEFAULT '#60a5fa' CHECK (color ~ '^#[0-9a-fA-F]{6}$'),
---     created_at timestamptz NOT NULL DEFAULT now(),
---     updated_at timestamptz NOT NULL DEFAULT now()
--- );
--- CREATE UNIQUE INDEX projects_org_name_idx ON projects (org_id, name);
--- CREATE TABLE user_project_access (
---     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
---     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
---     granted_at timestamptz NOT NULL DEFAULT now(),
---     PRIMARY KEY (user_id, project_id)
--- );
--- --------------------------------------------------------------------------------
--- CREATE INDEX upa_project_id_idx ON user_project_access (project_id);
--- -- Version: 1.03
--- -- Description: Add products view.
--- CREATE TABLE invites (
---     token text PRIMARY KEY,
---     user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
---     invited_by uuid NOT NULL REFERENCES users(id),
---     created_at timestamptz NOT NULL DEFAULT now(),
---     expires_at timestamptz NOT NULL DEFAULT now() + INTERVAL '48 hours'
--- );
--- --------------------------------------------------------------------------------
--- CREATE INDEX invites_user_id_idx ON invites (user_id);
--- CREATE INDEX invites_expires_at_idx ON invites (expires_at);
--- CREATE TABLE api_keys (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
---     created_by uuid NOT NULL REFERENCES users(id),
---     name text NOT NULL,
---     key_prefix text NOT NULL,
---     key_hash text NOT NULL UNIQUE,
---     last_used_at timestamptz,
---     revoked_at timestamptz,
---     created_at timestamptz NOT NULL DEFAULT now()
--- );
--- CREATE INDEX api_keys_project_id_idx ON api_keys (project_id);
--- CREATE INDEX api_keys_key_hash_idx ON api_keys (key_hash);
--- CREATE TABLE log_entries (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
---     level log_level NOT NULL,
---     message text NOT NULL,
---     source text NOT NULL,
---     tags text [] NOT NULL DEFAULT '{}',
---     meta jsonb NOT NULL DEFAULT '{}',
---     ts timestamptz NOT NULL,
---     ingested_at timestamptz NOT NULL DEFAULT now(),
---     api_key_id uuid REFERENCES api_keys(id) ON DELETE
---     SET NULL
--- );
--- CREATE TABLE integration_connections (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
---     provider text NOT NULL,
---     name text NOT NULL,
---     credentials bytea NOT NULL,
---     is_active boolean NOT NULL DEFAULT true,
---     created_by uuid NOT NULL REFERENCES users(id),
---     created_at timestamptz NOT NULL DEFAULT now(),
---     updated_at timestamptz NOT NULL DEFAULT now(),
---     UNIQUE (org_id, provider, name)
--- );
--- --------------------------------------------------------------------------------
--- CREATE TABLE alert_rules (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
---     connection_id uuid NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
---     name text NOT NULL,
---     level log_level NOT NULL,
---     project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
---     is_active boolean NOT NULL DEFAULT true,
---     created_by uuid NOT NULL REFERENCES users(id),
---     created_at timestamptz NOT NULL DEFAULT now(),
---     updated_at timestamptz NOT NULL DEFAULT now()
--- );
--- CREATE INDEX alert_rules_org_id_idx ON alert_rules (org_id);
--- CREATE INDEX alert_rules_level_project_idx ON alert_rules (level, project_id)
--- WHERE is_active = true;
--- CREATE TABLE audit_log (
---     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
---     org_id uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
---     actor_id uuid REFERENCES users(id) ON DELETE
---     SET NULL,
---         action text NOT NULL,
---         target_type text,
---         target_id uuid,
---         payload jsonb NOT NULL DEFAULT '{}',
---         ip_address inet,
---         ts timestamptz NOT NULL DEFAULT now()
--- );
--- CREATE INDEX audit_log_org_ts_idx ON audit_log (org_id, ts DESC);
--- CREATE INDEX audit_log_actor_id_idx ON audit_log (actor_id);
--- CREATE INDEX audit_log_target_idx ON audit_log (target_type, target_id);
--- CREATE EXTENSION IF NOT EXISTS pgcrypto;
--- CREATE EXTENSION IF NOT EXISTS pg_trgm;
--- CREATE EXTENSION IF NOT EXISTS pg_partman;
--- CREATE EXTENSION IF NOT EXISTS pg_cron;
+-- =========================================================
+-- Version: 1.05
+-- Description: Add missing columns to organizations
+-- =========================================================
+ALTER TABLE organizations
+ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS date_created TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS date_updated TIMESTAMPTZ;
+-- Back-fill from existing columns so NOT NULL is safe to add
+UPDATE organizations
+SET date_created = created_at,
+    date_updated = updated_at
+WHERE date_created IS NULL;
+ALTER TABLE organizations
+ALTER COLUMN date_created
+SET NOT NULL,
+    ALTER COLUMN date_updated
+SET NOT NULL;
+-- Optional: drop the old columns if you want to standardise naming
+-- ALTER TABLE organizations DROP COLUMN created_at, DROP COLUMN updated_at;
+-- =========================================================
+-- Version: 1.06
+-- Description: Create org_role enum
+-- =========================================================
+DO $$ BEGIN CREATE TYPE org_role AS ENUM (
+    'SUPER ADMIN',
+    'ORG ADMIN',
+    'PROJECT MANAGER',
+    'VIEWER'
+);
+EXCEPTION
+WHEN duplicate_object THEN NULL;
+END $$;
+-- =========================================================
+-- Version: 1.07
+-- Description: Create org_members table
+-- =========================================================
+CREATE TABLE IF NOT EXISTS org_members (
+    member_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    role org_role NOT NULL DEFAULT 'VIEWER',
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT org_members_pkey PRIMARY KEY (member_id),
+    CONSTRAINT org_members_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT org_members_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT org_members_org_user_unique UNIQUE (org_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS org_members_org_idx ON org_members (org_id);
+CREATE INDEX IF NOT EXISTS org_members_user_idx ON org_members (user_id);
+-- =========================================================
+-- Version: 1.08
+-- Description: Create subscription enums + subscriptions table
+-- =========================================================
+DO $$ BEGIN CREATE TYPE subscription_plan AS ENUM ('free', 'pro', 'enterprise');
+EXCEPTION
+WHEN duplicate_object THEN NULL;
+END $$;
+DO $$ BEGIN CREATE TYPE subscription_status AS ENUM ('trialing', 'active', 'past_due', 'cancelled');
+EXCEPTION
+WHEN duplicate_object THEN NULL;
+END $$;
+CREATE TABLE IF NOT EXISTS subscriptions (
+    subscription_id UUID NOT NULL DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    plan subscription_plan NOT NULL DEFAULT 'free',
+    status subscription_status NOT NULL DEFAULT 'trialing',
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT subscriptions_pkey PRIMARY KEY (subscription_id),
+    CONSTRAINT subscriptions_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT subscriptions_one_active UNIQUE (org_id, status) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS subscriptions_org_idx ON subscriptions (org_id);
+-- =========================================================
+-- Version: 1.09
+-- Description: Drop organizations column from users
+--              (membership is now tracked in org_members)
+-- =========================================================
+ALTER TABLE users DROP COLUMN IF EXISTS organizations;
+-- =========================================================
+-- Version: 1.10
+-- Description: Create projects and user_project_access tables
+-- =========================================================
+CREATE TABLE IF NOT EXISTS projects (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#60a5fa' CHECK (color ~ '^#[0-9a-fA-F]{6}$'),
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT projects_pkey PRIMARY KEY (id),
+    CONSTRAINT projects_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT projects_org_name_unique UNIQUE (org_id, name)
+);
+CREATE INDEX IF NOT EXISTS projects_org_idx ON projects (org_id);
+-- user_project_access scopes project_manager and viewer roles to
+-- specific projects within an org. org_admin and super_admin skip
+-- this table entirely — they see all projects via role check.
+CREATE TABLE IF NOT EXISTS user_project_access (
+    user_id UUID NOT NULL,
+    project_id UUID NOT NULL,
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT upa_pkey PRIMARY KEY (user_id, project_id),
+    CONSTRAINT upa_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT upa_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS upa_project_idx ON user_project_access (project_id);
