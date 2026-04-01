@@ -72,8 +72,12 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
-	actorID := mid.GetSubjectID(ctx)
-	expiresAt := time.Now().UTC().Add(10 * time.Minute)
+	userID, err := mid.GetUserID(ctx)
+	if err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	}
+
+	expiresAt := time.Now().UTC().Add(1 * time.Hour)
 
 	projectIDStrs := make([]string, len(busNew.ProjectIDs))
 	for i, id := range busNew.ProjectIDs {
@@ -84,7 +88,7 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	// we don't need to embed the DB row ID in the claims.
 	token, err := a.auth.GenerateInviteToken(a.signingKey, auth.InviteClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   actorID.String(),
+			Subject:   userID.String(),
 			Issuer:    a.auth.Issuer(),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
@@ -100,11 +104,11 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	}
 
 	busNew.OrgID = orgID
-	busNew.InvitedBy = actorID
+	busNew.InvitedBy = userID
 	busNew.Token = token
 	busNew.ExpiresAt = expiresAt
 
-	inv, err := a.invitationBus.Create(ctx, actorID, busNew)
+	inv, err := a.invitationBus.Create(ctx, userID, busNew)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "create invitation: %s", err)
 	}
@@ -115,7 +119,7 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "queryorg: %s", err)
 	}
 
-	inviter, err := a.userBus.QueryByID(ctx, actorID)
+	inviter, err := a.userBus.QueryByID(ctx, userID)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "queryinviter: %s", err)
 	}

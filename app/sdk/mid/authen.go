@@ -23,8 +23,8 @@ import (
 func Authenticate(client authclient.Authenticator) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
-			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			defer cancel()
+			// ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			// defer cancel()
 
 			resp, err := client.Authenticate(ctx, r.Header.Get("authorization"))
 			if err != nil {

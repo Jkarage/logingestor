@@ -173,6 +173,28 @@ func (s *Store) QueryByID(ctx context.Context, projectID uuid.UUID) (projectbus.
 	return toBusProject(dbProject), nil
 }
 
+// QueryByOrg returns all projects belonging to an org, with no membership filter.
+func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]projectbus.Project, error) {
+	data := struct {
+		OrgID string `db:"org_id"`
+	}{
+		OrgID: orgID.String(),
+	}
+
+	const q = `
+	SELECT id, org_id, name, color, date_created, date_updated
+	FROM projects
+	WHERE org_id = :org_id
+	ORDER BY date_created ASC`
+
+	var dbProjects []projectDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &dbProjects); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	return toBusProjects(dbProjects), nil
+}
+
 // GrantProjectAccess inserts a row into user_project_access. Duplicate grants
 // are silently ignored via ON CONFLICT DO NOTHING.
 func (s *Store) GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error {

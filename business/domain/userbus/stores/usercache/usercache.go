@@ -152,6 +152,16 @@ func (s *Store) deleteCache(bus userbus.User) {
 }
 
 func (s *Store) UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error {
-	// Not implemeneted
+	// Not implemented
 	return nil
+}
+
+// StoreVerifyToken delegates directly to the underlying store — no caching needed.
+func (s *Store) StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	return s.storer.StoreVerifyToken(ctx, userID, token, expiresAt)
+}
+
+// ConsumeVerifyToken delegates directly to the underlying store — no caching needed.
+func (s *Store) ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error) {
+	return s.storer.ConsumeVerifyToken(ctx, token)
 }

@@ -157,14 +157,15 @@ func toBusOrgMembers(dbs []orgMemberDB) ([]orgbus.OrgMember, error) {
 
 // orgMemberUserDB is the result of the JOIN between org_members and users.
 type orgMemberUserDB struct {
-	MemberID  uuid.UUID `db:"member_id"`
-	UserID    uuid.UUID `db:"user_id"`
-	OrgID     uuid.UUID `db:"org_id"`
-	UserName  string    `db:"user_name"`
-	Email     string    `db:"email"`
-	Role      string    `db:"role"`
-	Enabled   bool      `db:"enabled"`
-	JoinedAt  time.Time `db:"joined_at"`
+	MemberID     uuid.UUID `db:"member_id"`
+	UserID       uuid.UUID `db:"user_id"`
+	OrgID        uuid.UUID `db:"org_id"`
+	UserName     string    `db:"user_name"`
+	Email        string    `db:"email"`
+	Role         string    `db:"role"`
+	Enabled      bool      `db:"enabled"`
+	JoinedAt     time.Time `db:"joined_at"`
+	ProjectCount int       `db:"project_count"`
 }
 
 func toBusOrgMemberUser(db orgMemberUserDB) (orgbus.OrgMemberUser, error) {
@@ -179,14 +180,15 @@ func toBusOrgMemberUser(db orgMemberUserDB) (orgbus.OrgMemberUser, error) {
 	}
 
 	return orgbus.OrgMemberUser{
-		MemberID: db.MemberID,
-		UserID:   db.UserID,
-		OrgID:    db.OrgID,
-		Name:     nme,
-		Email:    db.Email,
-		Role:     r,
-		Enabled:  db.Enabled,
-		JoinedAt: db.JoinedAt.In(time.Local),
+		MemberID:     db.MemberID,
+		UserID:       db.UserID,
+		OrgID:        db.OrgID,
+		Name:         nme,
+		Email:        db.Email,
+		Role:         r,
+		Enabled:      db.Enabled,
+		JoinedAt:     db.JoinedAt.In(time.Local),
+		ProjectCount: db.ProjectCount,
 	}, nil
 }
 

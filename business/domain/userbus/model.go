@@ -17,7 +17,6 @@ type User struct {
 	Email        mail.Address
 	Roles        []role.Role
 	PasswordHash []byte
-	OrgIDs       []uuid.UUID
 	Enabled      bool
 	DateCreated  time.Time
 	DateUpdated  time.Time

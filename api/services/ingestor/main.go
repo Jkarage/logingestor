@@ -14,6 +14,7 @@ import (
 
 	"github.com/ardanlabs/conf/v3"
 	"github.com/jkarage/logingestor/api/services/ingestor/build"
+	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	http2 "github.com/jkarage/logingestor/app/sdk/authclient/http"
 	"github.com/jkarage/logingestor/app/sdk/debug"
@@ -25,6 +26,9 @@ import (
 	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationaudit"
 	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationotel"
 	"github.com/jkarage/logingestor/business/domain/invitationbus/stores/invitationdb"
+	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/logbus/extensions/logotel"
+	"github.com/jkarage/logingestor/business/domain/logbus/stores/logdb"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgaudit"
 	"github.com/jkarage/logingestor/business/domain/orgbus/extensions/orgotel"
@@ -82,22 +86,24 @@ func run(ctx context.Context, log *logger.Logger) error {
 	cfg := struct {
 		conf.Version
 		Web struct {
-			ReadTimeout        time.Duration `conf:"default:5s"`
-			WriteTimeout       time.Duration `conf:"default:10s"`
+			ReadTimeout        time.Duration `conf:"default:10s"`
+			WriteTimeout       time.Duration `conf:"default:20s"`
 			IdleTimeout        time.Duration `conf:"default:120s"`
-			ShutdownTimeout    time.Duration `conf:"default:20s"`
+			ShutdownTimeout    time.Duration `conf:"default:30s"`
 			APIHost            string        `conf:"default:0.0.0.0:3002"`
 			DebugHost          string        `conf:"default:0.0.0.0:3012"`
 			CORSAllowedOrigins []string      `conf:"default:*"`
 		}
 		DB struct {
-			User         string `conf:"default:postgres,env:DB_USERNAME"`
-			Password     string `conf:"default:postgres,env:DB_PASSWORD,mask"`
-			Host         string `conf:"default:12.13.14.15:5432,env:DB_HOST"`
-			Name         string `conf:"default:bsa,env:DB_NAME"`
-			MaxIdleConns int    `conf:"default:0"`
-			MaxOpenConns int    `conf:"default:0"`
-			DisableTLS   bool   `conf:"default:true"`
+			User            string        `conf:"default:postgres,env:DB_USERNAME"`
+			Password        string        `conf:"default:postgres,env:DB_PASSWORD,mask"`
+			Host            string        `conf:"default:12.13.14.15:5432,env:DB_HOST"`
+			Name            string        `conf:"default:bsa,env:DB_NAME"`
+			MaxIdleConns    int           `conf:"default:0"`
+			MaxOpenConns    int           `conf:"default:0"`
+			DisableTLS      bool          `conf:"default:true"`
+			ConnMaxLifetime time.Duration `conf:"default:2m"`
+			ConnMaxIdleTime time.Duration `conf:"default:1m"`
 		}
 		Auth struct {
 			Host       string `conf:"default:http://localhost:6000"`
@@ -158,13 +164,15 @@ func run(ctx context.Context, log *logger.Logger) error {
 	log.Info(ctx, "startup", "status", "initializing database support", "hostport", cfg.DB.Host)
 
 	db, err := sqldb.Open(sqldb.Config{
-		User:         cfg.DB.User,
-		Password:     cfg.DB.Password,
-		Host:         cfg.DB.Host,
-		Name:         cfg.DB.Name,
-		MaxIdleConns: cfg.DB.MaxIdleConns,
-		MaxOpenConns: cfg.DB.MaxOpenConns,
-		DisableTLS:   cfg.DB.DisableTLS,
+		User:            cfg.DB.User,
+		Password:        cfg.DB.Password,
+		Host:            cfg.DB.Host,
+		Name:            cfg.DB.Name,
+		MaxIdleConns:    cfg.DB.MaxIdleConns,
+		MaxOpenConns:    cfg.DB.MaxOpenConns,
+		DisableTLS:      cfg.DB.DisableTLS,
+		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
+		ConnMaxIdleTime: cfg.DB.ConnMaxIdleTime,
 	})
 	if err != nil {
 		return fmt.Errorf("connecting to db: %w", err)
@@ -200,6 +208,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 	invitationAuditExt := invitationaudit.NewExtension(auditBus)
 	invitationStorage := invitationdb.NewStore(log, db)
 	invitationBus := invitationbus.NewBusiness(log, delegate, invitationStorage, invitationOtelExt, invitationAuditExt)
+
+	logOtelExt := logotel.NewExtension()
+	logStorage := logdb.NewStore(log, db)
+	logBus := logbus.NewBusiness(log, logStorage, logOtelExt)
+
+	hub := logapp.NewHub()
 
 	// -------------------------------------------------------------------------
 	// Initialize authentication support
@@ -269,6 +283,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			OrgBus:        orgBus,
 			ProjectBus:    projectBus,
 			InvitationBus: invitationBus,
+			LogBus:        logBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,
@@ -279,6 +294,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		EmailConfig:  em,
 		EmailBaseURL: cfg.SendGrid.EmailBaseURL,
 		SigningKey:   cfg.Auth.ActiveKID,
+		LogHub:       hub,
 	}
 
 	webAPI := mux.WebAPI(cfgMux,

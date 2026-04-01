@@ -4,6 +4,7 @@ import (
 	"github.com/jkarage/logingestor/app/domain/auditapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
 	"github.com/jkarage/logingestor/app/domain/invitationapp"
+	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/domain/orgapp"
 	"github.com/jkarage/logingestor/app/domain/projectapp"
 	"github.com/jkarage/logingestor/app/domain/userapp"
@@ -69,5 +70,12 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Mailer:        cfg.EmailConfig,
 		EmailBaseURL:  cfg.EmailBaseURL,
 		SigningKey:    cfg.SigningKey,
+	})
+
+	logapp.Routes(app, logapp.Config{
+		Log:        cfg.Log,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+		LogBus:     cfg.BusConfig.LogBus,
+		Hub:        cfg.LogHub,
 	})
 }

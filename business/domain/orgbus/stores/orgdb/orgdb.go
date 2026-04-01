@@ -366,7 +366,14 @@ func (s *Store) QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID) ([]o
 		u.email,
 		m.role,
 		u.enabled,
-		m.joined_at
+		m.joined_at,
+		(
+			SELECT COUNT(*)
+			FROM user_project_access upa
+			JOIN projects p ON p.id = upa.project_id
+			WHERE upa.user_id = m.user_id
+			  AND p.org_id = m.org_id
+		) AS project_count
 	FROM
 		org_members m
 	JOIN

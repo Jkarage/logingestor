@@ -5,6 +5,7 @@ package useraudit
 import (
 	"context"
 	"net/mail"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
@@ -134,4 +135,12 @@ func (ext *Extension) Authenticate(ctx context.Context, email mail.Address, pass
 
 func (ext *Extension) Activate(ctx context.Context, userID uuid.UUID) error {
 	return ext.bus.Activate(ctx, userID)
+}
+
+func (ext *Extension) StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	return ext.bus.StoreVerifyToken(ctx, userID, token, expiresAt)
+}
+
+func (ext *Extension) ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error) {
+	return ext.bus.ConsumeVerifyToken(ctx, token)
 }

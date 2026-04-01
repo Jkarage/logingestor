@@ -50,13 +50,14 @@ func toAppOrgs(orgs []orgbus.Org) []Org {
 
 // OrgMember is the API representation of a member with their user profile.
 type OrgMember struct {
-	MemberID string `json:"memberID"`
-	UserID   string `json:"userID"`
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
-	Enabled  bool   `json:"enabled"`
-	JoinedAt string `json:"joinedAt"`
+	MemberID     string `json:"memberID"`
+	UserID       string `json:"userID"`
+	Name         string `json:"name"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	Enabled      bool   `json:"enabled"`
+	JoinedAt     string `json:"joinedAt"`
+	ProjectCount int    `json:"projectCount"`
 }
 
 // Encode implements the encoder interface.
@@ -78,13 +79,14 @@ func toAppOrgMembers(bus []orgbus.OrgMemberUser) OrgMembers {
 	members := make(OrgMembers, len(bus))
 	for i, m := range bus {
 		members[i] = OrgMember{
-			MemberID: m.MemberID.String(),
-			UserID:   m.UserID.String(),
-			Name:     m.Name.String(),
-			Email:    m.Email,
-			Role:     m.Role.String(),
-			Enabled:  m.Enabled,
-			JoinedAt: m.JoinedAt.Format(time.RFC3339),
+			MemberID:     m.MemberID.String(),
+			UserID:       m.UserID.String(),
+			Name:         m.Name.String(),
+			Email:        m.Email,
+			Role:         m.Role.String(),
+			Enabled:      m.Enabled,
+			JoinedAt:     m.JoinedAt.Format(time.RFC3339),
+			ProjectCount: m.ProjectCount,
 		}
 	}
 	return members

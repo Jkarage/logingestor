@@ -26,6 +26,10 @@ rule_viewer_only if {
 	claim_roles := {role | some role in input.Roles}
 	input_user := {role_viewer} & claim_roles
 	count(input_user) > 0
+} else if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_super_admin} & claim_roles
+	count(input_admin) > 0
 }
 
 default rule_project_manager_only := false
@@ -34,6 +38,10 @@ rule_project_manager_only if {
 	claim_roles := {role | some role in input.Roles}
 	input_admin := {role_project_manager} & claim_roles
 	count(input_admin) > 0
+} else if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_super_admin} & claim_roles
+	count(input_admin) > 0
 }
 
 default rule_org_admin_only := false
@@ -41,6 +49,10 @@ default rule_org_admin_only := false
 rule_org_admin_only if {
 	claim_roles := {role | some role in input.Roles}
 	input_admin := {role_org_admin} & claim_roles
+	count(input_admin) > 0
+} else if {
+	claim_roles := {role | some role in input.Roles}
+	input_admin := {role_super_admin} & claim_roles
 	count(input_admin) > 0
 }
 

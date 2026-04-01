@@ -22,6 +22,9 @@ var (
 	ErrNotFound              = errors.New("user not found")
 	ErrUniqueEmail           = errors.New("email is not unique")
 	ErrAuthenticationFailure = errors.New("authentication failed")
+	ErrTokenNotFound         = errors.New("verification token not found")
+	ErrTokenExpired          = errors.New("verification token has expired")
+	ErrTokenUsed             = errors.New("verification token has already been used")
 )
 
 // Storer interface declares the behavior this package needs to persist and
@@ -35,7 +38,8 @@ type Storer interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, userID uuid.UUID) (User, error)
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
-	// UpdateEnabled(ctx context.Context, userID uuid.UUID, enabled bool) error
+	StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error
+	ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra functionality
@@ -51,6 +55,8 @@ type ExtBusiness interface {
 	QueryByEmail(ctx context.Context, email mail.Address) (User, error)
 	Authenticate(ctx context.Context, email mail.Address, password string) (User, error)
 	Activate(ctx context.Context, userID uuid.UUID) error
+	StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error
+	ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -222,6 +228,25 @@ func (b *Business) Authenticate(ctx context.Context, email mail.Address, passwor
 	}
 
 	return usr, nil
+}
+
+// StoreVerifyToken persists the signed verification token so it can be
+// validated and consumed exactly once during email verification.
+func (b *Business) StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	if err := b.storer.StoreVerifyToken(ctx, userID, token, expiresAt); err != nil {
+		return fmt.Errorf("storeverifytoken: %w", err)
+	}
+	return nil
+}
+
+// ConsumeVerifyToken validates the token (not expired, not already used),
+// marks it as used, and returns the associated user ID.
+func (b *Business) ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error) {
+	userID, err := b.storer.ConsumeVerifyToken(ctx, token)
+	if err != nil {
+		return uuid.UUID{}, fmt.Errorf("consumeverifytoken: %w", err)
+	}
+	return userID, nil
 }
 
 // Activate sets enabled=true after email verification.

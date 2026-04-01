@@ -112,6 +112,22 @@ func (a *app) updateRole(ctx context.Context, r *http.Request) web.Encoder {
 	return nil
 }
 
+func (a *app) removeMember(ctx context.Context, r *http.Request) web.Encoder {
+	memberID, err := uuid.Parse(web.Param(r, "member_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	if err := a.orgBus.RemoveMember(ctx, mid.GetSubjectID(ctx), memberID); err != nil {
+		if errors.Is(err, orgbus.ErrMemberNotFound) {
+			return errs.New(errs.NotFound, err)
+		}
+		return errs.Errorf(errs.Internal, "removemember: memberID[%s]: %s", memberID, err)
+	}
+
+	return nil
+}
+
 func (a *app) delete(ctx context.Context, r *http.Request) web.Encoder {
 	orgID, err := uuid.Parse(web.Param(r, "org_id"))
 	if err != nil {

@@ -166,3 +166,34 @@ CREATE TABLE IF NOT EXISTS org_invitations (
 );
 CREATE INDEX IF NOT EXISTS org_invitations_org_idx ON org_invitations(org_id);
 CREATE INDEX IF NOT EXISTS org_invitations_email_idx ON org_invitations(email);
+-- =========================================================
+-- Version: 1.12
+-- Description: Create verification_tokens table
+-- =========================================================
+CREATE TABLE IF NOT EXISTS verification_tokens (
+    token TEXT PRIMARY KEY,
+    user_id UUID NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_at TIMESTAMPTZ NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT vt_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS verification_tokens_user_idx ON verification_tokens(user_id);
+-- =========================================================
+-- Version: 1.13
+-- Description: Create logs table
+-- =========================================================
+CREATE TABLE IF NOT EXISTS logs (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARN', 'ERROR')),
+    message TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+    tags TEXT [] NOT NULL DEFAULT '{}',
+    meta JSONB NOT NULL DEFAULT '{}',
+    CONSTRAINT logs_pkey PRIMARY KEY (id),
+    CONSTRAINT logs_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS logs_project_ts_idx ON logs (project_id, ts DESC);
+CREATE INDEX IF NOT EXISTS logs_level_idx ON logs (level);

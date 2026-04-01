@@ -6,11 +6,13 @@ import (
 	"embed"
 	"net/http"
 
+	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
+	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
@@ -70,6 +72,7 @@ type BusConfig struct {
 	AuditBus      auditbus.ExtBusiness
 	ProjectBus    projectbus.ExtBusiness
 	InvitationBus invitationbus.ExtBusiness
+	LogBus        logbus.ExtBusiness
 }
 
 // Config contains all the mandatory systems required by handlers.
@@ -83,7 +86,8 @@ type Config struct {
 	AuthConfig     AuthConfig
 	EmailConfig    *emailer.Config
 	EmailBaseURL   string
-	SigningKey     string
+	SigningKey      string
+	LogHub         *logapp.Hub
 }
 
 // RouteAdder defines behavior that sets the routes to bind for an instance

@@ -48,7 +48,7 @@ func (e *Config) SendInvite(toEmail, orgName, inviterName, inviteURL string) err
 
 	subject := fmt.Sprintf("You've been invited to join %s", orgName)
 	plain := fmt.Sprintf(
-		"%s has invited you to join %s on Niute.\n\nAccept your invitation:\n%s\n\nThis link expires in 72 hours.",
+		"%s has invited you to join %s on Niute.\n\nAccept your invitation:\n%s\n\nThis link expires in an hour.",
 		inviterName, orgName, inviteURL,
 	)
 	html := inviteHTMLBody(orgName, inviterName, inviteURL)

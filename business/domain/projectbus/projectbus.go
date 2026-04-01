@@ -33,6 +33,7 @@ type Storer interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, projectID uuid.UUID) (Project, error)
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
+	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error
 }
 
@@ -48,6 +49,7 @@ type ExtBusiness interface {
 	Count(ctx context.Context, filter QueryFilter) (int, error)
 	QueryByID(ctx context.Context, projectID uuid.UUID) (Project, error)
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
+	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error
 }
 
@@ -170,6 +172,15 @@ func (b *Business) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID 
 	projects, err := b.storer.QueryAccessible(ctx, orgID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("queryaccessible: %w", err)
+	}
+	return projects, nil
+}
+
+// QueryByOrg returns all projects in an org without any membership filter.
+func (b *Business) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error) {
+	projects, err := b.storer.QueryByOrg(ctx, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("querybyorg: %w", err)
 	}
 	return projects, nil
 }

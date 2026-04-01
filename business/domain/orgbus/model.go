@@ -128,14 +128,15 @@ func ParseSubscriptionStatus(value string) (SubscriptionStatus, error) {
 // OrgMemberUser combines membership metadata with the user's profile.
 // Used when listing all members of an org — avoids N+1 lookups.
 type OrgMemberUser struct {
-	MemberID uuid.UUID
-	UserID   uuid.UUID
-	OrgID    uuid.UUID
-	Name     name.Name
-	Email    string
-	Role     role.Role
-	Enabled  bool
-	JoinedAt time.Time
+	MemberID     uuid.UUID
+	UserID       uuid.UUID
+	OrgID        uuid.UUID
+	Name         name.Name
+	Email        string
+	Role         role.Role
+	Enabled      bool
+	JoinedAt     time.Time
+	ProjectCount int
 }
 
 // UserOrg is returned when listing the orgs a specific user belongs to.

@@ -5,6 +5,7 @@ package userotel
 import (
 	"context"
 	"net/mail"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/userbus"
@@ -112,8 +113,22 @@ func (ext *Extension) Authenticate(ctx context.Context, email mail.Address, pass
 }
 
 func (ext *Extension) Activate(ctx context.Context, userID uuid.UUID) error {
-	ctx, span := otel.AddSpan(ctx, "business.userbus.authenticate")
+	ctx, span := otel.AddSpan(ctx, "business.userbus.activate")
 	defer span.End()
 
 	return ext.bus.Activate(ctx, userID)
+}
+
+func (ext *Extension) StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	ctx, span := otel.AddSpan(ctx, "business.userbus.storeverifytoken")
+	defer span.End()
+
+	return ext.bus.StoreVerifyToken(ctx, userID, token, expiresAt)
+}
+
+func (ext *Extension) ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error) {
+	ctx, span := otel.AddSpan(ctx, "business.userbus.consumeverifytoken")
+	defer span.End()
+
+	return ext.bus.ConsumeVerifyToken(ctx, token)
 }

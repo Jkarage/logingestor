@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
@@ -82,16 +81,22 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	}
 
 	// Normal path: generate a verify token and send confirmation email.
+	// Normal path: generate a verify token, persist it, and send confirmation email.
+	expiresAt := time.Now().UTC().Add(24 * time.Hour)
 	token, err := a.auth.GenerateToken(a.signingKey, auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   usr.ID.String(),
 			Issuer:    a.auth.Issuer(),
-			ExpiresAt: jwt.NewNumericDate(time.Now().UTC().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
 			IssuedAt:  jwt.NewNumericDate(time.Now().UTC()),
 		},
 	})
 	if err != nil {
 		return errs.New(errs.Internal, err)
+	}
+
+	if err := a.userBus.StoreVerifyToken(ctx, usr.ID, token, expiresAt); err != nil {
+		return errs.Errorf(errs.Internal, "store verify token: %s", err)
 	}
 
 	link := a.emailBaseURL + "/verify?token=" + token
@@ -227,20 +232,28 @@ func (a *app) verify(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	// Authenticate parses the token, checks the signature using the public key
-	// matched by kid in the header, validates expiry + issuer, returns Claims.
-	claims, err := a.auth.ParseVerifyToken(context.Background(), cu.Token)
-	if err != nil {
-		return errs.New(errs.Internal, err)
-	}
-	userID, err := uuid.Parse(claims.Subject)
-	if err != nil {
-		return errs.New(errs.InvalidArgument, err)
+	// ParseVerifyToken checks the JWT signature and expiry via OPA.
+	if _, err := a.auth.ParseVerifyToken(context.Background(), cu.Token); err != nil {
+		return errs.New(errs.Unauthenticated, err)
 	}
 
-	// Flip enabled=true in DB
+	// ConsumeVerifyToken checks the DB: not already used, not expired.
+	// On success it marks used_at = now() and returns the user's ID.
+	userID, err := a.userBus.ConsumeVerifyToken(ctx, cu.Token)
+	if err != nil {
+		switch {
+		case errors.Is(err, userbus.ErrTokenNotFound):
+			return errs.New(errs.NotFound, err)
+		case errors.Is(err, userbus.ErrTokenUsed):
+			return errs.New(errs.Aborted, err)
+		case errors.Is(err, userbus.ErrTokenExpired):
+			return errs.New(errs.Aborted, err)
+		}
+		return errs.Errorf(errs.Internal, "consumeverifytoken: %s", err)
+	}
+
 	if err := a.userBus.Activate(ctx, userID); err != nil {
-		return errs.New(errs.Internal, err)
+		return errs.Errorf(errs.Internal, "activate: %s", err)
 	}
 
 	return nil

@@ -4,9 +4,11 @@ package userdb
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/mail"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/userbus"
@@ -185,6 +187,79 @@ func (s *Store) QueryByID(ctx context.Context, userID uuid.UUID) (userbus.User, 
 	}
 
 	return toBusUser(dbUsr)
+}
+
+// StoreVerifyToken inserts a new verification token row.
+func (s *Store) StoreVerifyToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	data := struct {
+		Token     string    `db:"token"`
+		UserID    string    `db:"user_id"`
+		ExpiresAt time.Time `db:"expires_at"`
+	}{
+		Token:     token,
+		UserID:    userID.String(),
+		ExpiresAt: expiresAt.UTC(),
+	}
+
+	const q = `
+	INSERT INTO verification_tokens (token, user_id, expires_at)
+	VALUES (:token, :user_id, :expires_at)`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// ConsumeVerifyToken validates a verification token and marks it as used.
+// Returns ErrTokenNotFound, ErrTokenExpired, or ErrTokenUsed on failure.
+func (s *Store) ConsumeVerifyToken(ctx context.Context, token string) (uuid.UUID, error) {
+	data := struct {
+		Token string `db:"token"`
+	}{Token: token}
+
+	const selectQ = `
+	SELECT user_id, expires_at, used_at
+	FROM verification_tokens
+	WHERE token = :token`
+
+	var row struct {
+		UserID    uuid.UUID    `db:"user_id"`
+		ExpiresAt time.Time    `db:"expires_at"`
+		UsedAt    sql.NullTime `db:"used_at"`
+	}
+
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, selectQ, data, &row); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return uuid.UUID{}, fmt.Errorf("db: %w", userbus.ErrTokenNotFound)
+		}
+		return uuid.UUID{}, fmt.Errorf("db: %w", err)
+	}
+
+	if row.UsedAt.Valid {
+		return uuid.UUID{}, userbus.ErrTokenUsed
+	}
+
+	if time.Now().After(row.ExpiresAt) {
+		return uuid.UUID{}, userbus.ErrTokenExpired
+	}
+
+	markData := struct {
+		Token  string    `db:"token"`
+		UsedAt time.Time `db:"used_at"`
+	}{
+		Token:  token,
+		UsedAt: time.Now().UTC(),
+	}
+
+	const updateQ = `UPDATE verification_tokens SET used_at = :used_at WHERE token = :token`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, updateQ, markData); err != nil {
+		return uuid.UUID{}, fmt.Errorf("mark used: %w", err)
+	}
+
+	return row.UserID, nil
 }
 
 // QueryByEmail gets the specified user from the database by email.

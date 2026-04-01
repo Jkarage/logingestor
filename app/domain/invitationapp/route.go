@@ -26,7 +26,7 @@ type Config struct {
 	InvitationBus invitationbus.ExtBusiness
 	Mailer        *emailer.Config
 	EmailBaseURL  string
-	SigningKey     string
+	SigningKey    string
 }
 
 // Routes adds specific routes for this group.

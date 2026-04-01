@@ -29,7 +29,7 @@ func UserAdd(log *logger.Logger, cfg sqldb.Config, nme string, email string, pas
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	userBus := userbus.NewBusiness(log, nil, userdb.NewStore(log, db))

@@ -10,6 +10,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
@@ -109,6 +110,17 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	orgID, err := uuid.Parse(web.Param(r, "org_id"))
 	if err != nil {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	claims := mid.GetClaims(ctx)
+	for _, claimRole := range claims.Roles {
+		if claimRole == role.Admin.String() {
+			projects, err := a.projectBus.QueryByOrg(ctx, orgID)
+			if err != nil {
+				return errs.Errorf(errs.Internal, "querybyorg: orgID[%s]: %s", orgID, err)
+			}
+			return toAppProjects(projects)
+		}
 	}
 
 	userID := mid.GetSubjectID(ctx)
