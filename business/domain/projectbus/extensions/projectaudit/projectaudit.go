@@ -126,3 +126,8 @@ func (ext *Extension) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]projec
 func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error {
 	return ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID)
 }
+
+// HasAccess does not apply auditing.
+func (ext *Extension) HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error) {
+	return ext.bus.HasAccess(ctx, userID, projectID)
+}

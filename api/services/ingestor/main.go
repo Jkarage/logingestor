@@ -111,11 +111,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 			ActiveKID  string `conf:"default:231c6f21-0207-4d5c-bc83-a4fdbd5cb06f"`
 			Issuer     string `conf:"default:confirm mail"`
 		}
-		SendGrid struct {
-			APIKey       string `conf:"default:xxxxxxx,env:SENDGRID_API_KEY"`
-			From         string `conf:"default:xxxxxxx,env:SENDGRID_FROM_EMAIL"`
-			FromName     string `conf:"default:xxxxxxx,env:SENDGRID_FROM_NAME"`
-			EmailBaseURL string `conf:"default:http://localhost:5173,env:SENDGRID_EMAILBASEURL"`
+		Resend struct {
+			APIKey       string `conf:"default:xxxxxxx,env:RESEND_API_KEY"`
+			From         string `conf:"default:xxxxxxx,env:RESEND_FROM_EMAIL"`
+			FromName     string `conf:"default:xxxxxxx,env:RESEND_FROM_NAME"`
+			EmailBaseURL string `conf:"default:http://localhost:5173,env:RESEND_EMAILBASEURL"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
@@ -254,7 +254,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	// -------------------------------------------------------------------------
 	// Email Setup
-	em := emailer.New(cfg.SendGrid.APIKey, cfg.SendGrid.From, cfg.SendGrid.FromName)
+	em := emailer.New(cfg.Resend.APIKey, cfg.Resend.From, cfg.Resend.FromName)
 
 	// -------------------------------------------------------------------------
 	// Start Debug Service
@@ -292,7 +292,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Auth: ath,
 		},
 		EmailConfig:  em,
-		EmailBaseURL: cfg.SendGrid.EmailBaseURL,
+		EmailBaseURL: cfg.Resend.EmailBaseURL,
 		SigningKey:   cfg.Auth.ActiveKID,
 		LogHub:       hub,
 	}

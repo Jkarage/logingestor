@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	Log        *logger.Logger
 	AuthClient authclient.Authenticator
 	LogBus     logbus.ExtBusiness
+	ProjectBus projectbus.ExtBusiness
 	Hub        *Hub
 }
 
@@ -24,7 +26,7 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 
-	a := newApp(cfg.LogBus, cfg.Hub)
+	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen)

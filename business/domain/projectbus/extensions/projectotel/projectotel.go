@@ -90,3 +90,10 @@ func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID,
 
 	return ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID)
 }
+
+func (ext *Extension) HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error) {
+	ctx, span := otel.AddSpan(ctx, "business.projectbus.hasaccess")
+	defer span.End()
+
+	return ext.bus.HasAccess(ctx, userID, projectID)
+}

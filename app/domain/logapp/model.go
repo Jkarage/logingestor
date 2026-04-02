@@ -30,17 +30,12 @@ type IngestRequest []IngestEntry
 
 // Decode implements the web.Decoder interface, accepting both object and array.
 func (r *IngestRequest) Decode(data []byte) error {
-	// Try array first.
-	var arr []IngestEntry
-	if err := json.Unmarshal(data, &arr); err == nil {
-		*r = arr
-		return nil
-	}
 	// Fall back to single object.
 	var single IngestEntry
 	if err := json.Unmarshal(data, &single); err != nil {
 		return err
 	}
+
 	*r = IngestRequest{single}
 	return nil
 }

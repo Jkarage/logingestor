@@ -76,6 +76,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Log:        cfg.Log,
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		LogBus:     cfg.BusConfig.LogBus,
+		ProjectBus: cfg.BusConfig.ProjectBus,
 		Hub:        cfg.LogHub,
 	})
 }

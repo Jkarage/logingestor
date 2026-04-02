@@ -218,6 +218,48 @@ func (s *Store) GrantProjectAccess(ctx context.Context, userID uuid.UUID, projec
 	return nil
 }
 
+// HasAccess reports whether userID has access to projectID via explicit grant
+// or org-admin / super-admin membership.
+func (s *Store) HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error) {
+	data := struct {
+		UserID    string `db:"user_id"`
+		ProjectID string `db:"project_id"`
+	}{
+		UserID:    userID.String(),
+		ProjectID: projectID.String(),
+	}
+
+	const q = `
+	SELECT EXISTS (
+		SELECT 1
+		FROM projects p
+		WHERE p.id = :project_id
+		  AND (
+		      EXISTS (
+		          SELECT 1 FROM org_members m
+		          WHERE m.org_id = p.org_id
+		            AND m.user_id = :user_id
+		            AND m.role IN ('ORG ADMIN', 'SUPER ADMIN')
+		      )
+		      OR
+		      EXISTS (
+		          SELECT 1 FROM user_project_access upa
+		          WHERE upa.project_id = p.id
+		            AND upa.user_id = :user_id
+		      )
+		  )
+	) AS has_access`
+
+	var result struct {
+		HasAccess bool `db:"has_access"`
+	}
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &result); err != nil {
+		return false, fmt.Errorf("namedquerystruct: %w", err)
+	}
+
+	return result.HasAccess, nil
+}
+
 // QueryAccessible returns only the projects within an org that the given user can see.
 func (s *Store) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
 	data := struct {

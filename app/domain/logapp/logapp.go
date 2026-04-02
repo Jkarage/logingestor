@@ -13,6 +13,8 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
@@ -21,12 +23,13 @@ var upgrader = websocket.Upgrader{
 }
 
 type app struct {
-	logBus logbus.ExtBusiness
-	hub    *Hub
+	logBus     logbus.ExtBusiness
+	projectBus projectbus.ExtBusiness
+	hub        *Hub
 }
 
-func newApp(logBus logbus.ExtBusiness, hub *Hub) *app {
-	return &app{logBus: logBus, hub: hub}
+func newApp(logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub) *app {
+	return &app{logBus: logBus, projectBus: projectBus, hub: hub}
 }
 
 // ingest handles POST /v1/ingest.
@@ -44,6 +47,35 @@ func (a *app) ingest(ctx context.Context, r *http.Request) web.Encoder {
 	newLogs, fieldErrs := toBusNewLogs(req)
 	if fieldErrs != nil {
 		return fieldErrs.ToError()
+	}
+
+	// Enforce project-level access unless the caller is a SUPER ADMIN.
+	claims := mid.GetClaims(ctx)
+	isSuperAdmin := false
+	for _, r := range claims.Roles {
+		if r == role.Admin.String() {
+			isSuperAdmin = true
+			break
+		}
+	}
+
+	if !isSuperAdmin {
+		userID := mid.GetSubjectID(ctx)
+		seen := make(map[uuid.UUID]struct{})
+		for _, nl := range newLogs {
+			if _, checked := seen[nl.ProjectID]; checked {
+				continue
+			}
+			seen[nl.ProjectID] = struct{}{}
+
+			ok, err := a.projectBus.HasAccess(ctx, userID, nl.ProjectID)
+			if err != nil {
+				return errs.Errorf(errs.Internal, "hasaccess: projectID[%s]: %s", nl.ProjectID, err)
+			}
+			if !ok {
+				return errs.Errorf(errs.PermissionDenied, "user does not have access to project %s", nl.ProjectID)
+			}
+		}
 	}
 
 	logs, err := a.logBus.BulkCreate(ctx, newLogs)
@@ -168,6 +200,7 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+
 	defer conn.Close()
 
 	a.hub.subscribe(projectID, conn)

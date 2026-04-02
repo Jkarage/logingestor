@@ -35,6 +35,7 @@ type Storer interface {
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
 	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error
+	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -51,6 +52,7 @@ type ExtBusiness interface {
 	QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
 	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error
+	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -193,4 +195,15 @@ func (b *Business) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, us
 		return fmt.Errorf("grantprojectaccess: %w", err)
 	}
 	return nil
+}
+
+// HasAccess reports whether userID has access to projectID, either via
+// explicit user_project_access or by being an org admin / super admin of the
+// project's org.
+func (b *Business) HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error) {
+	ok, err := b.storer.HasAccess(ctx, userID, projectID)
+	if err != nil {
+		return false, fmt.Errorf("hasaccess: %w", err)
+	}
+	return ok, nil
 }
