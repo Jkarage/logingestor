@@ -112,10 +112,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Issuer     string `conf:"default:confirm mail"`
 		}
 		Resend struct {
-			APIKey       string `conf:"default:xxxxxxx,env:RESEND_API_KEY"`
-			From         string `conf:"default:xxxxxxx,env:RESEND_FROM_EMAIL"`
-			FromName     string `conf:"default:xxxxxxx,env:RESEND_FROM_NAME"`
-			EmailBaseURL string `conf:"default:http://localhost:5173,env:RESEND_EMAILBASEURL"`
+			APIKey       string `conf:"default:xxxxxxx,env:API_KEY"`
+			From         string `conf:"default:xxxxxxx,env:FROM_EMAIL"`
+			FromName     string `conf:"default:xxxxxxx,env:FROM_NAME"`
+			EmailBaseURL string `conf:"default:http://localhost:5173,env:EMAILBASEURL"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
