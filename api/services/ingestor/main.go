@@ -106,13 +106,13 @@ func run(ctx context.Context, log *logger.Logger) error {
 			ConnMaxIdleTime time.Duration `conf:"default:1m"`
 		}
 		Auth struct {
-			Host       string `conf:"default:https://api.auth.streamlogia.com"`
+			Host       string `conf:"default:http://localhost:6000"`
 			KeysFolder string `conf:"default:zarf/keys/"`
 			ActiveKID  string `conf:"default:231c6f21-0207-4d5c-bc83-a4fdbd5cb06f"`
 			Issuer     string `conf:"default:confirm mail"`
 		}
 		Resend struct {
-			APIKey       string `conf:"default:re_FM93RW4o_fps4M3Uk8eWvkJEMytbTGG6j"`
+			APIKey       string `conf:"default:xxxxxxxxxxxxxxxxxxxxx"`
 			From         string `conf:"default:info@streamlogia.com"`
 			FromName     string `conf:"default:Info"`
 			EmailBaseURL string `conf:"default:https://streamlogia.com"`
