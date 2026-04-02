@@ -32,8 +32,9 @@ func (e *Config) SendVerification(toEmail, toName, verifyURL string) error {
 	_, err := client.Emails.Send(&resend.SendEmailRequest{
 		From:    e.from(),
 		To:      []string{toEmail},
-		Subject: "Verify your email address",
-		Html:    htmlBody(verifyURL),
+		Subject: "Verify your email address – Streamlogia",
+		Html:    verifyHTMLBody(verifyURL),
+		Text:    verifyPlainBody(verifyURL),
 	})
 	if err != nil {
 		return fmt.Errorf("resend send: %w", err)
@@ -46,13 +47,14 @@ func (e *Config) SendVerification(toEmail, toName, verifyURL string) error {
 func (e *Config) SendInvite(toEmail, orgName, inviterName, inviteURL string) error {
 	client := resend.NewClient(e.APIKey)
 
-	subject := fmt.Sprintf("You've been invited to join %s", orgName)
+	subject := fmt.Sprintf("%s invited you to join %s on Streamlogia", inviterName, orgName)
 
 	_, err := client.Emails.Send(&resend.SendEmailRequest{
 		From:    e.from(),
 		To:      []string{toEmail},
 		Subject: subject,
 		Html:    inviteHTMLBody(orgName, inviterName, inviteURL),
+		Text:    invitePlainBody(orgName, inviterName, inviteURL),
 	})
 	if err != nil {
 		return fmt.Errorf("resend send: %w", err)
@@ -61,180 +63,192 @@ func (e *Config) SendInvite(toEmail, orgName, inviterName, inviteURL string) err
 	return nil
 }
 
+// =============================================================================
+// Invite email
+
+func invitePlainBody(orgName, inviterName, inviteURL string) string {
+	return fmt.Sprintf(
+		"%s has invited you to join %s on Streamlogia.\n\n"+
+			"Accept your invitation:\n%s\n\n"+
+			"This link expires in 72 hours.\n\n"+
+			"If you weren't expecting this invitation, you can safely ignore this email.\n\n"+
+			"– The Streamlogia team",
+		inviterName, orgName, inviteURL,
+	)
+}
+
 func inviteHTMLBody(orgName, inviterName, inviteURL string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Invitation to %s | Niute</title>
+  <title>%s invited you to join %s</title>
 </head>
-<body style="margin:0; padding:0; background-color:#f5f7fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, Helvetica, Arial, sans-serif;">
+<body style="margin:0; padding:0; background-color:#f5f7fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <table width="100%%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f7fb; padding:32px 0;">
     <tr>
       <td align="center">
         <table width="540" cellpadding="0" cellspacing="0" border="0"
-               style="max-width:540px; width:100%%; background-color:#ffffff; border-radius:24px;
-                      overflow:hidden; box-shadow:0 8px 20px rgba(0,0,0,0.02), 0 2px 6px rgba(0,0,0,0.03);">
+               style="max-width:540px; width:100%%; background-color:#ffffff; border-radius:16px;
+                      overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+
+          <!-- Header -->
           <tr>
-            <td style="background:#ffffff; padding:24px 32px 8px 32px; border-bottom:1px solid #f0f2f5;">
-              <span style="font-size:18px; font-weight:620; letter-spacing:-0.2px; color:#0a0c12;">niute</span>
+            <td style="background:#ffffff; padding:24px 32px 16px 32px; border-bottom:1px solid #f0f2f5;">
+              <span style="font-size:17px; font-weight:700; letter-spacing:-0.3px; color:#0a0c12;">Streamlogia</span>
             </td>
           </tr>
+
+          <!-- Body -->
           <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <div style="background:#f8fafd; width:40px; height:40px; border-radius:32px; display:flex; align-items:center; justify-content:center;">
-                <span style="font-size:20px;">🤝</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:16px 32px 20px 32px;">
-              <h2 style="margin:0 0 8px 0; font-size:20px; font-weight:590; letter-spacing:-0.2px; color:#111316; line-height:1.35;">
-                You're invited to join %s
+            <td style="padding:28px 32px 8px 32px;">
+              <h2 style="margin:0 0 10px 0; font-size:20px; font-weight:600; color:#111316; line-height:1.35;">
+                You've been invited to join %s
               </h2>
-              <p style="margin:0 0 20px 0; font-size:14px; line-height:1.5; color:#4a515e;">
-                <strong style="color:#111316;">%s</strong> has invited you to collaborate on <strong style="color:#111316;">%s</strong>.
-                Click below to accept your invitation. This link expires in <strong style="font-weight:590; color:#111316;">72 hours</strong>.
+              <p style="margin:0 0 24px 0; font-size:14px; line-height:1.6; color:#4a515e;">
+                <strong style="color:#111316;">%s</strong> has invited you to collaborate on
+                <strong style="color:#111316;">%s</strong> on Streamlogia.
+                Accept below — this invitation expires in <strong style="color:#111316;">72 hours</strong>.
               </p>
-              <table cellpadding="0" cellspacing="0" border="0" style="margin: 6px 0 28px 0;">
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
                 <tr>
-                  <td align="center" style="background:#0a0c12; border-radius:40px;">
-                    <a href="%s" style="display:inline-block; padding:10px 26px; background:#0a0c12; color:#ffffff;
-                                  font-size:13px; font-weight:500; text-decoration:none; border-radius:40px;
-                                  letter-spacing:-0.1px; border:0;">
-                      Accept invitation →
+                  <td style="background:#0a0c12; border-radius:8px;">
+                    <a href="%s"
+                       style="display:inline-block; padding:12px 28px; color:#ffffff;
+                              font-size:14px; font-weight:600; text-decoration:none; border-radius:8px;">
+                      Accept invitation
                     </a>
                   </td>
                 </tr>
               </table>
-              <div style="border-top:1px solid #f0f2f5; margin-top:8px; padding-top:20px;">
-                <p style="margin:0 0 5px 0; font-size:11px; color:#848c9a;">🔗 Button not working? Copy this link:</p>
-                <p style="margin:0; word-break:break-all;">
-                  <a href="%s" style="font-size:11px; font-family: 'SF Mono', monospace; color:#2c5f8a; text-decoration:underline;">%s</a>
+
+              <!-- Fallback link -->
+              <div style="background:#f8fafd; border-radius:8px; padding:14px 16px; margin-bottom:24px;">
+                <p style="margin:0 0 6px 0; font-size:12px; color:#6b7280;">
+                  Button not working? Copy and paste this link into your browser:
+                </p>
+                <p style="margin:0; word-break:break-all; font-size:12px; font-family:monospace; color:#374151;">
+                  %s
                 </p>
               </div>
             </td>
           </tr>
+
+          <!-- Footer -->
           <tr>
-            <td style="padding:0 32px;"><hr style="border:0; height:1px; background:#f0f2f5; margin:0;"></td>
-          </tr>
-          <tr>
-            <td style="padding:20px 32px 28px 32px;">
-              <p style="margin:0; font-size:11px; line-height:1.45; color:#9198a3;">
+            <td style="padding:0 32px 24px 32px; border-top:1px solid #f0f2f5;">
+              <p style="margin:16px 0 0 0; font-size:12px; line-height:1.5; color:#9198a3;">
                 If you weren't expecting this invitation, you can safely ignore this email.
+                You won't be added to any organisation unless you click the link above.
               </p>
             </td>
           </tr>
+
         </table>
       </td>
     </tr>
   </table>
 </body>
-</html>`, orgName, orgName, inviterName, orgName, inviteURL, inviteURL, inviteURL)
+</html>`, inviterName, orgName, orgName, inviterName, orgName, inviteURL, inviteURL)
 }
 
-// htmlBody returns the full HTML email with modern, minimal design and reduced font sizes.
-func htmlBody(verifyURL string) string {
+// =============================================================================
+// Verification email
+
+func verifyPlainBody(verifyURL string) string {
+	return fmt.Sprintf(
+		"Welcome to Streamlogia!\n\n"+
+			"Please verify your email address by visiting the link below:\n%s\n\n"+
+			"This link expires in 24 hours.\n\n"+
+			"If you did not create an account, you can safely ignore this email.\n\n"+
+			"– The Streamlogia team",
+		verifyURL,
+	)
+}
+
+func verifyHTMLBody(verifyURL string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verify your email | Niute</title>
+  <title>Verify your email – Streamlogia</title>
   <style>
     @media only screen and (max-width: 600px) {
       .container { width: 100%% !important; }
       .inner-padding { padding-left: 24px !important; padding-right: 24px !important; }
-      .btn { padding: 10px 22px !important; font-size: 13px !important; }
-      h1 { font-size: 18px !important; }
-      h2 { font-size: 17px !important; }
-      .body-text { font-size: 13px !important; }
-      .footer-text { font-size: 10px !important; }
-      .link-fallback { font-size: 11px !important; }
     }
   </style>
 </head>
-<body style="margin:0; padding:0; background-color:#f5f7fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, Helvetica, Arial, sans-serif;">
+<body style="margin:0; padding:0; background-color:#f5f7fb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
   <table width="100%%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f7fb; padding:32px 0;">
     <tr>
       <td align="center">
         <table class="container" width="540" cellpadding="0" cellspacing="0" border="0"
-               style="max-width:540px; width:100%%; background-color:#ffffff; border-radius:24px;
-                      overflow:hidden; box-shadow:0 8px 20px rgba(0,0,0,0.02), 0 2px 6px rgba(0,0,0,0.03);">
+               style="max-width:540px; width:100%%; background-color:#ffffff; border-radius:16px;
+                      overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.06);">
+
+          <!-- Header -->
           <tr>
-            <td style="background:#ffffff; padding:24px 32px 8px 32px; border-bottom:1px solid #f0f2f5;">
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span style="font-size:18px; font-weight:620; letter-spacing:-0.2px; color:#0a0c12;">niute</span>
-                <span style="width:4px; height:4px; background:#e2e6ec; border-radius:50%%; display:inline-block;"></span>
-                <span style="font-size:12px; font-weight:450; color:#868e9c;">verify</span>
-              </div>
+            <td style="background:#ffffff; padding:24px 32px 16px 32px; border-bottom:1px solid #f0f2f5;">
+              <span style="font-size:17px; font-weight:700; letter-spacing:-0.3px; color:#0a0c12;">Streamlogia</span>
             </td>
           </tr>
+
+          <!-- Body -->
           <tr>
-            <td style="padding:24px 32px 0 32px;">
-              <div style="background:#f8fafd; width:40px; height:40px; border-radius:32px; display:flex; align-items:center; justify-content:center;">
-                <span style="font-size:20px;">✉️</span>
-              </div>
-            </td>
-          </tr>
-          <tr>
-            <td class="inner-padding" style="padding:16px 32px 20px 32px;">
-              <h2 style="margin:0 0 8px 0; font-size:20px; font-weight:590; letter-spacing:-0.2px; color:#111316; line-height:1.35;">
-                Confirm your email
+            <td class="inner-padding" style="padding:28px 32px 8px 32px;">
+              <h2 style="margin:0 0 10px 0; font-size:20px; font-weight:600; color:#111316; line-height:1.35;">
+                Confirm your email address
               </h2>
-              <p class="body-text" style="margin:0 0 20px 0; font-size:14px; line-height:1.5; color:#4a515e;">
-                Almost done. Click the button below to verify your address and activate your Niute account.
-                This link expires in <strong style="font-weight:590; color:#111316;">24 hours</strong>.
+              <p style="margin:0 0 24px 0; font-size:14px; line-height:1.6; color:#4a515e;">
+                Thanks for signing up for Streamlogia. Click the button below to verify your
+                email address and activate your account.
+                This link expires in <strong style="color:#111316;">24 hours</strong>.
               </p>
-              <table cellpadding="0" cellspacing="0" border="0" style="margin: 6px 0 28px 0;">
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" border="0" style="margin-bottom:28px;">
                 <tr>
-                  <td align="center" style="background:#0a0c12; border-radius:40px;">
-                    <a href="%s" class="btn" style="display:inline-block; padding:10px 26px; background:#0a0c12; color:#ffffff;
-                                  font-size:13px; font-weight:500; text-decoration:none; border-radius:40px;
-                                  letter-spacing:-0.1px; border:0;">
-                      Verify email →
+                  <td style="background:#0a0c12; border-radius:8px;">
+                    <a href="%s"
+                       style="display:inline-block; padding:12px 28px; color:#ffffff;
+                              font-size:14px; font-weight:600; text-decoration:none; border-radius:8px;">
+                      Verify email address
                     </a>
                   </td>
                 </tr>
               </table>
-              <div style="border-top:1px solid #f0f2f5; margin-top:8px; padding-top:20px;">
-                <p style="margin:0 0 5px 0; font-size:11px; color:#848c9a; letter-spacing:-0.1px;">
-                  🔗 Button not working? Copy this link:
+
+              <!-- Fallback link -->
+              <div style="background:#f8fafd; border-radius:8px; padding:14px 16px; margin-bottom:24px;">
+                <p style="margin:0 0 6px 0; font-size:12px; color:#6b7280;">
+                  Button not working? Copy and paste this link into your browser:
                 </p>
-                <p style="margin:0; word-break:break-all;">
-                  <a href="%s" class="link-fallback" style="font-size:11px; font-family: 'SF Mono', monospace; color:#2c5f8a; text-decoration:underline; word-break:break-all;">%s</a>
+                <p style="margin:0; word-break:break-all; font-size:12px; font-family:monospace; color:#374151;">
+                  %s
                 </p>
               </div>
             </td>
           </tr>
+
+          <!-- Footer -->
           <tr>
-            <td style="padding:0 32px;">
-              <hr style="border:0; height:1px; background:#f0f2f5; margin:0;">
-            </td>
-          </tr>
-          <tr>
-            <td class="inner-padding" style="padding:20px 32px 28px 32px;">
-              <p class="footer-text" style="margin:0 0 10px 0; font-size:11px; line-height:1.45; color:#9198a3;">
+            <td class="inner-padding" style="padding:0 32px 24px 32px; border-top:1px solid #f0f2f5;">
+              <p style="margin:16px 0 0 0; font-size:12px; line-height:1.5; color:#9198a3;">
                 If you didn't request this, you can safely ignore this email.
                 No changes will be made to your account.
               </p>
-              <p class="footer-text" style="margin:0; font-size:10px; color:#a6aebc;">
-                Niute — simple &amp; secure
-              </p>
             </td>
           </tr>
-        </table>
-        <table width="540" style="max-width:540px; width:100%%; margin-top:16px;">
-          <tr>
-            <td align="center" style="font-size:10px; color:#9ba2af; padding:0 20px; letter-spacing:0.2px;">
-              Secure link • expires in 24 hours
-            </td>
-          </tr>
+
         </table>
       </td>
     </tr>
   </table>
 </body>
-</html>`, verifyURL, verifyURL, verifyURL)
+</html>`, verifyURL, verifyURL)
 }
