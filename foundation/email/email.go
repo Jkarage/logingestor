@@ -70,7 +70,7 @@ func invitePlainBody(orgName, inviterName, inviteURL string) string {
 	return fmt.Sprintf(
 		"%s has invited you to join %s on Streamlogia.\n\n"+
 			"Accept your invitation:\n%s\n\n"+
-			"This link expires in 72 hours.\n\n"+
+			"This link expires in 1 hour.\n\n"+
 			"If you weren't expecting this invitation, you can safely ignore this email.\n\n"+
 			"– The Streamlogia team",
 		inviterName, orgName, inviteURL,
@@ -124,16 +124,6 @@ func inviteHTMLBody(orgName, inviterName, inviteURL string) string {
                   </td>
                 </tr>
               </table>
-
-              <!-- Fallback link -->
-              <div style="background:#f8fafd; border-radius:8px; padding:14px 16px; margin-bottom:24px;">
-                <p style="margin:0 0 6px 0; font-size:12px; color:#6b7280;">
-                  Button not working? Copy and paste this link into your browser:
-                </p>
-                <p style="margin:0; word-break:break-all; font-size:12px; font-family:monospace; color:#374151;">
-                  %s
-                </p>
-              </div>
             </td>
           </tr>
 
@@ -152,7 +142,7 @@ func inviteHTMLBody(orgName, inviterName, inviteURL string) string {
     </tr>
   </table>
 </body>
-</html>`, inviterName, orgName, orgName, inviterName, orgName, inviteURL, inviteURL)
+</html>`, inviterName, orgName, orgName, inviterName, orgName, inviteURL)
 }
 
 // =============================================================================
@@ -222,19 +212,8 @@ func verifyHTMLBody(verifyURL string) string {
                   </td>
                 </tr>
               </table>
-
-              <!-- Fallback link -->
-              <div style="background:#f8fafd; border-radius:8px; padding:14px 16px; margin-bottom:24px;">
-                <p style="margin:0 0 6px 0; font-size:12px; color:#6b7280;">
-                  Button not working? Copy and paste this link into your browser:
-                </p>
-                <p style="margin:0; word-break:break-all; font-size:12px; font-family:monospace; color:#374151;">
-                  %s
-                </p>
-              </div>
             </td>
           </tr>
-
           <!-- Footer -->
           <tr>
             <td class="inner-padding" style="padding:0 32px 24px 32px; border-top:1px solid #f0f2f5;">
@@ -250,5 +229,5 @@ func verifyHTMLBody(verifyURL string) string {
     </tr>
   </table>
 </body>
-</html>`, verifyURL, verifyURL)
+</html>`, verifyURL)
 }
