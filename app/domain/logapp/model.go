@@ -20,7 +20,7 @@ type IngestEntry struct {
 	Level     string         `json:"level"`
 	Message   string         `json:"message"`
 	Source    string         `json:"source"`
-	Ts        *string        `json:"ts"`
+	Timestamp *string        `json:"ts"` //Todo(update this to use value semantics)
 	Tags      []string       `json:"tags"`
 	Meta      map[string]any `json:"meta"`
 }
@@ -30,6 +30,13 @@ type IngestRequest []IngestEntry
 
 // Decode implements the web.Decoder interface, accepting both object and array.
 func (r *IngestRequest) Decode(data []byte) error {
+	// Try array first.
+	var arr []IngestEntry
+	if err := json.Unmarshal(data, &arr); err == nil {
+		*r = IngestRequest(arr)
+		return nil
+	}
+
 	// Fall back to single object.
 	var single IngestEntry
 	if err := json.Unmarshal(data, &single); err != nil {
@@ -68,8 +75,8 @@ func toBusNewLogs(entries IngestRequest) ([]logbus.NewLog, *errs.FieldErrors) {
 		}
 
 		ts := time.Now().UTC()
-		if e.Ts != nil {
-			parsed, err := time.Parse(time.RFC3339Nano, *e.Ts)
+		if e.Timestamp != nil {
+			parsed, err := time.Parse(time.RFC3339Nano, *e.Timestamp)
 			if err != nil {
 				fieldErrs.Add(fmt.Sprintf("[%d].ts", i), err)
 				continue
@@ -91,7 +98,7 @@ func toBusNewLogs(entries IngestRequest) ([]logbus.NewLog, *errs.FieldErrors) {
 			Level:     lvl,
 			Message:   e.Message,
 			Source:    e.Source,
-			Ts:        ts,
+			Timestamp: ts,
 			Tags:      tags,
 			Meta:      meta,
 		})
@@ -119,7 +126,7 @@ func (r IngestResponse) Encode() ([]byte, string, error) {
 // Log entry
 
 // LogEntry is the API representation of a log row.
-// Note: the frontend expects "pid" (not "projectId").
+// Note: the frontend expects "pid" (not "projectId"). // TODO: Update the frontend to use project_id.
 type LogEntry struct {
 	ID      string         `json:"id"`
 	PID     string         `json:"pid"`
@@ -146,7 +153,7 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 		Level:   bus.Level.String(),
 		Message: bus.Message,
 		Source:  bus.Source,
-		Ts:      bus.Ts.UTC().Format(time.RFC3339Nano),
+		Ts:      bus.Timestamp.UTC().Format(time.RFC3339Nano),
 		Tags:    tags,
 		Meta:    meta,
 	}

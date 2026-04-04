@@ -8,17 +8,36 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// connState wraps a WebSocket connection with its own write mutex.
+// gorilla/websocket requires that only one concurrent goroutine writes
+// to a connection at a time; this mutex enforces that invariant so
+// simultaneous ingest calls don't corrupt frames.
+type connState struct {
+	mu   sync.Mutex
+	conn *websocket.Conn
+}
+
+func (cs *connState) writeJSON(v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	return cs.conn.WriteMessage(websocket.TextMessage, data)
+}
+
 // Hub maintains per-project WebSocket subscriber sets and broadcasts
 // new log entries to them as they are ingested.
 type Hub struct {
 	mu    sync.RWMutex
-	rooms map[uuid.UUID]map[*websocket.Conn]struct{}
+	rooms map[uuid.UUID]map[*websocket.Conn]*connState
 }
 
 // NewHub creates a new Hub.
 func NewHub() *Hub {
 	return &Hub{
-		rooms: make(map[uuid.UUID]map[*websocket.Conn]struct{}),
+		rooms: make(map[uuid.UUID]map[*websocket.Conn]*connState),
 	}
 }
 
@@ -27,9 +46,9 @@ func (h *Hub) subscribe(projectID uuid.UUID, conn *websocket.Conn) {
 	defer h.mu.Unlock()
 
 	if h.rooms[projectID] == nil {
-		h.rooms[projectID] = make(map[*websocket.Conn]struct{})
+		h.rooms[projectID] = make(map[*websocket.Conn]*connState)
 	}
-	h.rooms[projectID][conn] = struct{}{}
+	h.rooms[projectID][conn] = &connState{conn: conn}
 }
 
 func (h *Hub) unsubscribe(projectID uuid.UUID, conn *websocket.Conn) {
@@ -44,26 +63,30 @@ func (h *Hub) unsubscribe(projectID uuid.UUID, conn *websocket.Conn) {
 	}
 }
 
-// broadcast sends entries to all WebSocket connections subscribed to projectID.
+// broadcast sends all entries as a JSON array to every WebSocket connection
+// subscribed to projectID. Sending the whole batch as one array frame is more
+// efficient than one frame per entry and also easier for the frontend to handle.
 func (h *Hub) broadcast(projectID uuid.UUID, entries []LogEntry) {
 	h.mu.RLock()
-	conns := make([]*websocket.Conn, 0, len(h.rooms[projectID]))
-	for c := range h.rooms[projectID] {
-		conns = append(conns, c)
+	states := make([]*connState, 0, len(h.rooms[projectID]))
+	for _, cs := range h.rooms[projectID] {
+		states = append(states, cs)
 	}
 	h.mu.RUnlock()
 
-	if len(conns) == 0 {
+	if len(states) == 0 {
 		return
 	}
 
-	for _, entry := range entries {
-		data, err := json.Marshal(entry)
-		if err != nil {
-			continue
-		}
-		for _, c := range conns {
-			_ = c.WriteMessage(websocket.TextMessage, data)
-		}
+	// Marshal the whole batch once, then send the same bytes to every subscriber.
+	data, err := json.Marshal(entries)
+	if err != nil {
+		return
+	}
+
+	for _, cs := range states {
+		cs.mu.Lock()
+		_ = cs.conn.WriteMessage(websocket.TextMessage, data)
+		cs.mu.Unlock()
 	}
 }

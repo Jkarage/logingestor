@@ -169,6 +169,21 @@ func (a *App) HandlerFunc(method string, group string, path string, handlerFunc 
 	a.mux.HandleFunc(finalPath, h)
 }
 
+// RawHandlerFuncNoMid sets a raw handler function for a given HTTP method and path
+// pair to the application server mux, with NO middleware applied (not even the
+// global app middleware). This is required for WebSocket upgrade handlers because
+// the app middleware captures http.ResponseWriter before the upgrade and may
+// interfere with the hijacked connection.
+func (a *App) RawHandlerFuncNoMid(method string, group string, path string, rawHandlerFunc http.HandlerFunc) {
+	finalPath := path
+	if group != "" {
+		finalPath = "/" + group + path
+	}
+	finalPath = fmt.Sprintf("%s %s", method, finalPath)
+
+	a.mux.HandleFunc(finalPath, rawHandlerFunc)
+}
+
 // RawHandlerFunc sets a raw handler function for a given HTTP method and path
 // pair to the application server mux.
 func (a *App) RawHandlerFunc(method string, group string, path string, rawHandlerFunc http.HandlerFunc, mw ...MidFunc) {

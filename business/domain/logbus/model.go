@@ -51,7 +51,7 @@ type Log struct {
 	Level     Level
 	Message   string
 	Source    string
-	Ts        time.Time
+	Timestamp time.Time
 	Tags      []string
 	Meta      map[string]any
 }
@@ -62,7 +62,7 @@ type NewLog struct {
 	Level     Level
 	Message   string
 	Source    string
-	Ts        time.Time
+	Timestamp time.Time
 	Tags      []string
 	Meta      map[string]any
 }

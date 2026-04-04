@@ -73,7 +73,7 @@ func (b *Business) BulkCreate(ctx context.Context, entries []NewLog) ([]Log, err
 			Level:     nl.Level,
 			Message:   nl.Message,
 			Source:    nl.Source,
-			Ts:        nl.Ts,
+			Timestamp: nl.Timestamp,
 			Tags:      tags,
 			Meta:      meta,
 		}
@@ -108,7 +108,7 @@ func (b *Business) Query(ctx context.Context, filter QueryFilter, limit int, cur
 	var nextCursor *string
 	if len(logs) == limit {
 		last := logs[len(logs)-1]
-		enc := encodeCursor(last.Ts, last.ID)
+		enc := encodeCursor(last.Timestamp, last.ID)
 		nextCursor = &enc
 	}
 

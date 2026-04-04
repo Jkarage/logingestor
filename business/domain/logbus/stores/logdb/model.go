@@ -67,7 +67,7 @@ func toDBLog(bus logbus.Log) logDB {
 		Level:     bus.Level.String(),
 		Message:   bus.Message,
 		Source:    bus.Source,
-		Ts:        bus.Ts.UTC(),
+		Ts:        bus.Timestamp.UTC(),
 		Tags:      tags,
 		Meta:      jsonMap(bus.Meta),
 	}
@@ -88,7 +88,7 @@ func toBusLog(db logDB) (logbus.Log, error) {
 		Level:     lvl,
 		Message:   db.Message,
 		Source:    db.Source,
-		Ts:        db.Ts.In(time.Local),
+		Timestamp: db.Ts.In(time.Local),
 		Tags:      tags,
 		Meta:      map[string]any(db.Meta),
 	}, nil

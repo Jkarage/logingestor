@@ -26,10 +26,17 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 
-	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub)
+	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub, cfg.AuthClient)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stats", a.stats, authen)
-	app.RawHandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stream", a.stream)
+
+	// The stream endpoint upgrades to WebSocket. It MUST bypass the app-level
+	// middleware stack (logging, error handling, panics) because those middleware
+	// functions capture the http.ResponseWriter before the upgrade and may write
+	// to it after the connection has been hijacked, which corrupts the WS frames
+	// and causes "WebSocket is closed before the connection is established".
+	// Authentication is handled manually inside a.stream via the ?token= param.
+	app.RawHandlerFuncNoMid(http.MethodGet, version, "/projects/{project_id}/logs/stream", a.stream)
 }
