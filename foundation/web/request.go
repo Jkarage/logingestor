@@ -29,8 +29,6 @@ func Decode(r *http.Request, v Decoder) error {
 		return fmt.Errorf("request: unable to read payload: %w", err)
 	}
 
-	fmt.Println("Input data: ", string(data))
-
 	if err := v.Decode(data); err != nil {
 		return fmt.Errorf("request: decode: %w", err)
 	}

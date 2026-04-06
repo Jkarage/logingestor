@@ -107,6 +107,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the redirect switch to GET, causing 405 on POST/PUT/DELETE routes.
 	r.URL.Path = path.Clean(r.URL.Path)
 
+	// WebSocket upgrade requests must bypass otelhttp. otelhttp wraps
+	// http.ResponseWriter in its own type that does not implement
+	// http.Hijacker. gorilla/websocket's upgrader requires Hijacker to
+	// take over the TCP connection, so passing the wrapped writer causes
+	// the upgrade to fail with a 500 and the browser gets
+	// "WebSocket connection failed".
+	if r.Header.Get("Upgrade") == "websocket" {
+		a.mux.ServeHTTP(w, r)
+		return
+	}
+
 	a.otmux.ServeHTTP(w, r)
 }
 
