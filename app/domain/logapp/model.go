@@ -76,7 +76,11 @@ func toBusNewLogs(entries IngestRequest) ([]logbus.NewLog, *errs.FieldErrors) {
 
 		ts := time.Now().UTC()
 		if e.Timestamp != nil {
-			parsed, err := time.Parse(time.RFC3339Nano, *e.Timestamp)
+			parsed, err := time.Parse(time.RFC3339, *e.Timestamp)
+			if err != nil {
+				// Fall back to millisecond precision (what browsers/JS typically send).
+				parsed, err = time.Parse("2006-01-02T15:04:05.000Z07:00", *e.Timestamp)
+			}
 			if err != nil {
 				fieldErrs.Add(fmt.Sprintf("[%d].ts", i), err)
 				continue
@@ -153,7 +157,7 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 		Level:   bus.Level.String(),
 		Message: bus.Message,
 		Source:  bus.Source,
-		Ts:      bus.Timestamp.UTC().Format(time.RFC3339Nano),
+		Ts:      bus.Timestamp.UTC().Format(time.RFC3339),
 		Tags:    tags,
 		Meta:    meta,
 	}
