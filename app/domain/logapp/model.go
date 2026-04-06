@@ -20,7 +20,7 @@ type IngestEntry struct {
 	Level     string         `json:"level"`
 	Message   string         `json:"message"`
 	Source    string         `json:"source"`
-	Timestamp *string        `json:"ts"` //Todo(update this to use value semantics)
+	Timestamp *string        `json:"timestamp"` //Todo(update this to use value semantics)
 	Tags      []string       `json:"tags"`
 	Meta      map[string]any `json:"meta"`
 }
@@ -137,7 +137,7 @@ type LogEntry struct {
 	Level   string         `json:"level"`
 	Message string         `json:"message"`
 	Source  string         `json:"source"`
-	Ts      string         `json:"ts"`
+	Timestamp string         `json:"timestamp"`
 	Tags    []string       `json:"tags"`
 	Meta    map[string]any `json:"meta"`
 }
@@ -157,7 +157,7 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 		Level:   bus.Level.String(),
 		Message: bus.Message,
 		Source:  bus.Source,
-		Ts:      bus.Timestamp.UTC().Format(time.RFC3339),
+		Timestamp: bus.Timestamp.UTC().Format(time.RFC3339),
 		Tags:    tags,
 		Meta:    meta,
 	}
