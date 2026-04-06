@@ -88,6 +88,7 @@ type Config struct {
 	EmailBaseURL   string
 	SigningKey      string
 	LogHub         *logapp.Hub
+	AllowedOrigins []string
 }
 
 // RouteAdder defines behavior that sets the routes to bind for an instance

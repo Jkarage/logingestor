@@ -19,19 +19,41 @@ import (
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 type app struct {
 	logBus     logbus.ExtBusiness
 	projectBus projectbus.ExtBusiness
 	hub        *Hub
 	authClient authclient.Authenticator
+	upgrader   websocket.Upgrader
 }
 
-func newApp(logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub, authClient authclient.Authenticator) *app {
-	return &app{logBus: logBus, projectBus: projectBus, hub: hub, authClient: authClient}
+func newApp(logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
+	// Build an origin set for O(1) lookup.
+	originSet := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		originSet[o] = struct{}{}
+	}
+
+	checkOrigin := func(r *http.Request) bool {
+		// If the config says "*" allow everything (dev / wildcard CORS).
+		if _, ok := originSet["*"]; ok {
+			return true
+		}
+		_, ok := originSet[r.Header.Get("Origin")]
+		return ok
+	}
+
+	return &app{
+		logBus:     logBus,
+		projectBus: projectBus,
+		hub:        hub,
+		authClient: authClient,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin:     checkOrigin,
+		},
+	}
 }
 
 // ingest handles POST /v1/ingest.
@@ -218,7 +240,7 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 3. Upgrade to WebSocket ───────────────────────────────────────────
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := a.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		// Upgrade writes the error response itself; nothing more to do.
 		return

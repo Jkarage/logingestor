@@ -291,10 +291,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 		AuthConfig: mux.AuthConfig{
 			Auth: ath,
 		},
-		EmailConfig:  em,
-		EmailBaseURL: cfg.Resend.EmailBaseURL,
-		SigningKey:   cfg.Auth.ActiveKID,
-		LogHub:       hub,
+		EmailConfig:    em,
+		EmailBaseURL:   cfg.Resend.EmailBaseURL,
+		SigningKey:     cfg.Auth.ActiveKID,
+		LogHub:         hub,
+		AllowedOrigins: cfg.Web.CORSAllowedOrigins,
 	}
 
 	webAPI := mux.WebAPI(cfgMux,

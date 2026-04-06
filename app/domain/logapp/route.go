@@ -13,11 +13,12 @@ import (
 
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
-	Log        *logger.Logger
-	AuthClient authclient.Authenticator
-	LogBus     logbus.ExtBusiness
-	ProjectBus projectbus.ExtBusiness
-	Hub        *Hub
+	Log            *logger.Logger
+	AuthClient     authclient.Authenticator
+	LogBus         logbus.ExtBusiness
+	ProjectBus     projectbus.ExtBusiness
+	Hub            *Hub
+	AllowedOrigins []string
 }
 
 // Routes adds specific routes for this group.
@@ -26,7 +27,7 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 
-	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub, cfg.AuthClient)
+	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub, cfg.AuthClient, cfg.AllowedOrigins)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen)

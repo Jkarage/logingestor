@@ -73,10 +73,11 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	})
 
 	logapp.Routes(app, logapp.Config{
-		Log:        cfg.Log,
-		AuthClient: cfg.IngestorConfig.AuthClient,
-		LogBus:     cfg.BusConfig.LogBus,
-		ProjectBus: cfg.BusConfig.ProjectBus,
-		Hub:        cfg.LogHub,
+		Log:            cfg.Log,
+		AuthClient:     cfg.IngestorConfig.AuthClient,
+		LogBus:         cfg.BusConfig.LogBus,
+		ProjectBus:     cfg.BusConfig.ProjectBus,
+		Hub:            cfg.LogHub,
+		AllowedOrigins: cfg.AllowedOrigins,
 	})
 }
