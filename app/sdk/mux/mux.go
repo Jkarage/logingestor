@@ -86,6 +86,7 @@ type Config struct {
 	AuthConfig     AuthConfig
 	EmailConfig    *emailer.Config
 	EmailBaseURL   string
+	SupportEmail   string
 	SigningKey      string
 	LogHub         *logapp.Hub
 	AllowedOrigins []string

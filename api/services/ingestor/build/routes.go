@@ -3,6 +3,7 @@ package build
 import (
 	"github.com/jkarage/logingestor/app/domain/auditapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
+	"github.com/jkarage/logingestor/app/domain/contactapp"
 	"github.com/jkarage/logingestor/app/domain/invitationapp"
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/domain/orgapp"
@@ -21,6 +22,11 @@ type all struct{}
 
 // Add implements the RouterAdder interface.
 func (all) Add(app *web.App, cfg mux.Config) {
+	contactapp.Routes(app, contactapp.Config{
+		Mailer:       cfg.EmailConfig,
+		SupportEmail: cfg.SupportEmail,
+	})
+
 	checkapp.Routes(app, checkapp.Config{
 		Build: cfg.Build,
 		Log:   cfg.Log,

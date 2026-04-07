@@ -63,6 +63,25 @@ func (e *Config) SendInvite(toEmail, orgName, inviterName, inviteURL string) err
 	return nil
 }
 
+// SendContactMessage forwards a customer contact form submission to the support inbox.
+// The customer's email is set as Reply-To so the team can reply directly to them.
+func (e *Config) SendContactMessage(supportEmail, fromName, fromEmail, subject, message string) error {
+	client := resend.NewClient(e.APIKey)
+
+	_, err := client.Emails.Send(&resend.SendEmailRequest{
+		From:    e.from(),
+		To:      []string{supportEmail},
+		ReplyTo: fmt.Sprintf("%s <%s>", fromName, fromEmail),
+		Subject: fmt.Sprintf("[Contact] %s", subject),
+		Text:    fmt.Sprintf("From: %s <%s>\n\n%s", fromName, fromEmail, message),
+	})
+	if err != nil {
+		return fmt.Errorf("resend send: %w", err)
+	}
+
+	return nil
+}
+
 // =============================================================================
 // Invite email
 
