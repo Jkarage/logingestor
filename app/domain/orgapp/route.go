@@ -40,6 +40,6 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodGet, version, "/orgs", api.query, authen, ruleSuperAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs", api.create, authen)
 	app.HandlerFunc(http.MethodPut, version, "/orgs/role/{org_id}", api.updateRole, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}", api.update, authen, ruleOrgMember, ruleAuthorizeUser)
+	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}", api.update, authen, ruleOrgMember, ruleOrgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}", api.delete, authen, ruleOrgMember, ruleAuthorizeUser)
 }

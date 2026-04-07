@@ -22,11 +22,6 @@ type all struct{}
 
 // Add implements the RouterAdder interface.
 func (all) Add(app *web.App, cfg mux.Config) {
-	contactapp.Routes(app, contactapp.Config{
-		Mailer:       cfg.EmailConfig,
-		SupportEmail: cfg.SupportEmail,
-	})
-
 	checkapp.Routes(app, checkapp.Config{
 		Build: cfg.Build,
 		Log:   cfg.Log,
@@ -86,4 +81,10 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Hub:            cfg.LogHub,
 		AllowedOrigins: cfg.AllowedOrigins,
 	})
+
+	contactapp.Routes(app, contactapp.Config{
+		Mailer:       cfg.EmailConfig,
+		SupportEmail: cfg.SupportEmail,
+	})
+
 }

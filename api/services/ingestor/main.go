@@ -116,7 +116,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			From         string `conf:"default:info@streamlogia.com"`
 			FromName     string `conf:"default:Info"`
 			EmailBaseURL string `conf:"default:https://streamlogia.com"`
-			SupportEmail string `conf:"default:support@streamlogia.com,env:RESEND_SUPPORT_EMAIL"`
+			SupportEmail string `conf:"default:support@streamlogia.com"`
 		}
 		Tempo struct {
 			Host        string  `conf:"default:tempo:4317"`
