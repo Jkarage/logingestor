@@ -77,7 +77,7 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	expiresAt := time.Now().UTC().Add(1 * time.Hour)
+	expiresAt := time.Now().UTC().Add(72 * time.Hour)
 
 	projectIDStrs := make([]string, len(busNew.ProjectIDs))
 	for i, id := range busNew.ProjectIDs {

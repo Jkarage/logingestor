@@ -89,7 +89,7 @@ func invitePlainBody(orgName, inviterName, inviteURL string) string {
 	return fmt.Sprintf(
 		"%s has invited you to join %s on Streamlogia.\n\n"+
 			"Accept your invitation:\n%s\n\n"+
-			"This link expires in 1 hour.\n\n"+
+			"This link expires in 72 hours.\n\n"+
 			"If you weren't expecting this invitation, you can safely ignore this email.\n\n"+
 			"– The Streamlogia team",
 		inviterName, orgName, inviteURL,
