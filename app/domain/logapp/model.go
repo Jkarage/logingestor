@@ -132,14 +132,14 @@ func (r IngestResponse) Encode() ([]byte, string, error) {
 // LogEntry is the API representation of a log row.
 // Note: the frontend expects "pid" (not "projectId"). // TODO: Update the frontend to use project_id.
 type LogEntry struct {
-	ID      string         `json:"id"`
-	PID     string         `json:"pid"`
-	Level   string         `json:"level"`
-	Message string         `json:"message"`
-	Source  string         `json:"source"`
+	ID        string         `json:"id"`
+	PID       string         `json:"pid"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Source    string         `json:"source"`
 	Timestamp string         `json:"timestamp"`
-	Tags    []string       `json:"tags"`
-	Meta    map[string]any `json:"meta"`
+	Tags      []string       `json:"tags"`
+	Meta      map[string]any `json:"meta"`
 }
 
 func toAppLogEntry(bus logbus.Log) LogEntry {
@@ -152,14 +152,14 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 		meta = map[string]any{}
 	}
 	return LogEntry{
-		ID:      bus.ID.String(),
-		PID:     bus.ProjectID.String(),
-		Level:   bus.Level.String(),
-		Message: bus.Message,
-		Source:  bus.Source,
+		ID:        bus.ID.String(),
+		PID:       bus.ProjectID.String(),
+		Level:     bus.Level.String(),
+		Message:   bus.Message,
+		Source:    bus.Source,
 		Timestamp: bus.Timestamp.UTC().Format(time.RFC3339),
-		Tags:    tags,
-		Meta:    meta,
+		Tags:      tags,
+		Meta:      meta,
 	}
 }
 

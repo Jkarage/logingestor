@@ -158,6 +158,6 @@ func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUI
 	if afterTs != nil && afterID != nil {
 		data["cursor_ts"] = afterTs.UTC()
 		data["cursor_id"] = afterID.String()
-		writeWhere(dataBuf, "(ts < :cursor_ts OR (ts = :cursor_ts AND id::text < :cursor_id))")
+		writeWhere(dataBuf, "(ts < :cursor_ts OR (ts = :cursor_ts AND CAST(id AS text) < :cursor_id))")
 	}
 }
