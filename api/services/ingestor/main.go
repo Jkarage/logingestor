@@ -12,7 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"encoding/hex"
+
 	"github.com/ardanlabs/conf/v3"
+
 	"github.com/jkarage/logingestor/api/services/ingestor/build"
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/sdk/auth"
@@ -22,6 +25,9 @@ import (
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
+	"github.com/jkarage/logingestor/business/domain/integrationbus"
+	"github.com/jkarage/logingestor/business/domain/integrationbus/providers"
+	"github.com/jkarage/logingestor/business/domain/integrationbus/stores/integrationdb"
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
 	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationaudit"
 	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationotel"
@@ -125,6 +131,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// Shouldn't use a high Probability value in non-developer systems.
 			// 0.05 should be enough for most systems. Some might want to have
 			// this even lower.
+		}
+		Integration struct {
+			// EncryptionKey must be a 64-character hex string (32 bytes → AES-256).
+			// Generate with: openssl rand -hex 32
+			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
 		}
 	}{
 		Version: conf.Version{
@@ -258,6 +269,28 @@ func run(ctx context.Context, log *logger.Logger) error {
 	em := emailer.New(cfg.Resend.APIKey, cfg.Resend.From, cfg.Resend.FromName)
 
 	// -------------------------------------------------------------------------
+	// Integration Bus
+
+	encKey, err := hex.DecodeString(cfg.Integration.EncryptionKey)
+	if err != nil || len(encKey) != 32 {
+		return fmt.Errorf("integration encryption key must be a 64-character hex string (32 bytes): %w", err)
+	}
+
+	integrationCallers := map[string]integrationbus.Caller{
+		"slack":     providers.NewSlack(),
+		"discord":   providers.NewDiscord(),
+		"telegram":  providers.NewTelegram(),
+		"pagerduty": providers.NewPagerDuty(),
+		"webhook":   providers.NewWebhook(),
+		"email":     providers.NewEmail(em),
+		"opsgenie":  providers.NewOpsGenie(),
+		"jira":      providers.NewJira(),
+	}
+
+	integrationStorage := integrationdb.NewStore(log, db, encKey)
+	integrationBus := integrationbus.NewBusiness(log, integrationStorage, integrationCallers)
+
+	// -------------------------------------------------------------------------
 	// Start Debug Service
 
 	go func() {
@@ -279,12 +312,13 @@ func run(ctx context.Context, log *logger.Logger) error {
 		Build: tag,
 		Log:   log,
 		BusConfig: mux.BusConfig{
-			AuditBus:      auditBus,
-			UserBus:       userBus,
-			OrgBus:        orgBus,
-			ProjectBus:    projectBus,
-			InvitationBus: invitationBus,
-			LogBus:        logBus,
+			AuditBus:       auditBus,
+			UserBus:        userBus,
+			OrgBus:         orgBus,
+			ProjectBus:     projectBus,
+			InvitationBus:  invitationBus,
+			LogBus:         logBus,
+			IntegrationBus: integrationBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

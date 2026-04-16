@@ -63,6 +63,23 @@ func (e *Config) SendInvite(toEmail, orgName, inviterName, inviteURL string) err
 	return nil
 }
 
+// SendAlert sends a plain-text alert notification email to the given address.
+func (e *Config) SendAlert(toEmail, subject, body string) error {
+	client := resend.NewClient(e.APIKey)
+
+	_, err := client.Emails.Send(&resend.SendEmailRequest{
+		From:    e.from(),
+		To:      []string{toEmail},
+		Subject: subject,
+		Text:    body,
+	})
+	if err != nil {
+		return fmt.Errorf("resend send: %w", err)
+	}
+
+	return nil
+}
+
 // SendContactMessage forwards a customer contact form submission to the support inbox.
 // The customer's email is set as Reply-To so the team can reply directly to them.
 func (e *Config) SendContactMessage(supportEmail, fromName, fromEmail, subject, message string) error {

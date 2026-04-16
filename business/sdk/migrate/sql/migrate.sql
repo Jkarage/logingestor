@@ -197,3 +197,32 @@ CREATE TABLE IF NOT EXISTS logs (
 );
 CREATE INDEX IF NOT EXISTS logs_project_ts_idx ON logs (project_id, ts DESC);
 CREATE INDEX IF NOT EXISTS logs_level_idx ON logs (level);
+-- Version: 1.14
+-- Description: Create integration_providers table (seeded, static catalog)
+CREATE TABLE IF NOT EXISTS integration_providers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    type TEXT NOT NULL,
+    description TEXT NOT NULL,
+    fields JSONB NOT NULL DEFAULT '[]',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order INT NOT NULL DEFAULT 0
+);
+-- Version: 1.15
+-- Description: Create integrations table (per-org configured integrations)
+CREATE TABLE IF NOT EXISTS integrations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    provider_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    credentials_enc BYTEA NOT NULL,
+    credentials_iv BYTEA NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT integrations_org_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT integrations_provider_fk FOREIGN KEY (provider_id) REFERENCES integration_providers(id),
+    CONSTRAINT integrations_org_provider_name_uq UNIQUE (org_id, provider_id, name)
+);
+CREATE INDEX IF NOT EXISTS integrations_org_idx ON integrations(org_id);
