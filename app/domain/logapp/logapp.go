@@ -227,7 +227,8 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := a.authClient.Authenticate(r.Context(), "Bearer "+token); err != nil {
+	authResp, err := a.authClient.Authenticate(r.Context(), "Bearer "+token)
+	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -237,6 +238,27 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "invalid project_id", http.StatusBadRequest)
 		return
+	}
+
+	// ── 2a. Authorize project access ──────────────────────────────────────
+	// Super admins have system-wide access; skip the per-project check.
+	isSuperAdmin := false
+	for _, claimRole := range authResp.Claims.Roles {
+		if claimRole == role.Admin.String() {
+			isSuperAdmin = true
+			break
+		}
+	}
+	if !isSuperAdmin {
+		ok, err := a.projectBus.HasAccess(r.Context(), authResp.UserID, projectID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !ok {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 	}
 
 	// ── 3. Upgrade to WebSocket ───────────────────────────────────────────
