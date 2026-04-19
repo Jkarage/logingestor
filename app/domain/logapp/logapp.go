@@ -16,10 +16,12 @@ import (
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/types/role"
+	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
 type app struct {
+	log        *logger.Logger
 	logBus     logbus.ExtBusiness
 	projectBus projectbus.ExtBusiness
 	hub        *Hub
@@ -27,7 +29,7 @@ type app struct {
 	upgrader   websocket.Upgrader
 }
 
-func newApp(logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
+func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
 	// Build an origin set for O(1) lookup.
 	originSet := make(map[string]struct{}, len(allowedOrigins))
 	for _, o := range allowedOrigins {
@@ -44,6 +46,7 @@ func newApp(logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *H
 	}
 
 	return &app{
+		log:        log,
 		logBus:     logBus,
 		projectBus: projectBus,
 		hub:        hub,
@@ -229,6 +232,7 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 
 	authResp, err := a.authClient.Authenticate(r.Context(), "Bearer "+token)
 	if err != nil {
+		a.log.Info(r.Context(), "stream: authenticate failed", "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -252,10 +256,12 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 	if !isSuperAdmin {
 		ok, err := a.projectBus.HasAccess(r.Context(), authResp.UserID, projectID)
 		if err != nil {
+			a.log.Info(r.Context(), "stream: hasaccess error", "userID", authResp.UserID, "projectID", projectID, "err", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		if !ok {
+			a.log.Info(r.Context(), "stream: access denied", "userID", authResp.UserID, "projectID", projectID)
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}

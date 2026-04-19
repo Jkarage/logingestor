@@ -27,7 +27,7 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 
-	a := newApp(cfg.LogBus, cfg.ProjectBus, cfg.Hub, cfg.AuthClient, cfg.AllowedOrigins)
+	a := newApp(cfg.Log, cfg.LogBus, cfg.ProjectBus, cfg.Hub, cfg.AuthClient, cfg.AllowedOrigins)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen)
