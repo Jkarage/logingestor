@@ -217,6 +217,122 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationb
 	return result, nil
 }
 
+// =============================================================================
+// Alert Rule CRUD
+
+// CreateRule inserts a new alert rule into the database.
+func (s *Store) CreateRule(ctx context.Context, r integrationbus.AlertRule) error {
+	const q = `
+	INSERT INTO alert_rules
+		(id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at)
+	VALUES
+		(:id, :org_id, :connection_id, :project_id, :name, :level, :is_active, :created_at, :updated_at)`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBAlertRule(r)); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateRule replaces a rule's mutable fields in the database.
+func (s *Store) UpdateRule(ctx context.Context, r integrationbus.AlertRule) error {
+	const q = `
+	UPDATE alert_rules
+	SET
+		name          = :name,
+		level         = :level,
+		connection_id = :connection_id,
+		project_id    = :project_id,
+		is_active     = :is_active,
+		updated_at    = :updated_at
+	WHERE
+		id = :id`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBAlertRule(r)); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteRule removes an alert rule from the database.
+func (s *Store) DeleteRule(ctx context.Context, id uuid.UUID) error {
+	data := struct {
+		ID uuid.UUID `db:"id"`
+	}{ID: id}
+
+	const q = `DELETE FROM alert_rules WHERE id = :id`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// QueryRuleByID returns the alert rule identified by id.
+func (s *Store) QueryRuleByID(ctx context.Context, id uuid.UUID) (integrationbus.AlertRule, error) {
+	data := struct {
+		ID string `db:"id"`
+	}{ID: id.String()}
+
+	const q = `
+	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	FROM alert_rules
+	WHERE id = :id`
+
+	var db alertRuleDB
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &db); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return integrationbus.AlertRule{}, fmt.Errorf("db: %w", integrationbus.ErrRuleNotFound)
+		}
+		return integrationbus.AlertRule{}, fmt.Errorf("db: %w", err)
+	}
+
+	return toBusAlertRule(db), nil
+}
+
+// QueryRulesByOrg returns all alert rules for an org, ordered by creation date.
+func (s *Store) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationbus.AlertRule, error) {
+	data := struct {
+		OrgID string `db:"org_id"`
+	}{OrgID: orgID.String()}
+
+	const q = `
+	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	FROM alert_rules
+	WHERE org_id = :org_id
+	ORDER BY created_at ASC`
+
+	var dbs []alertRuleDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &dbs); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	rules := make([]integrationbus.AlertRule, len(dbs))
+	for i, db := range dbs {
+		rules[i] = toBusAlertRule(db)
+	}
+
+	return rules, nil
+}
+
+// DisableRulesByConnection sets is_active=false on all rules referencing a connection.
+func (s *Store) DisableRulesByConnection(ctx context.Context, connectionID uuid.UUID) error {
+	data := struct {
+		ConnectionID uuid.UUID `db:"connection_id"`
+	}{ConnectionID: connectionID}
+
+	const q = `UPDATE alert_rules SET is_active = false WHERE connection_id = :connection_id`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
 // QueryProviders returns all enabled integration provider definitions, ordered by sort_order.
 func (s *Store) QueryProviders(ctx context.Context) ([]integrationbus.Provider, error) {
 	const q = `

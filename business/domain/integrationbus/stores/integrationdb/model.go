@@ -8,6 +8,47 @@ import (
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 )
 
+// alertRuleDB is the database representation of an alert rule.
+type alertRuleDB struct {
+	ID           uuid.UUID  `db:"id"`
+	OrgID        uuid.UUID  `db:"org_id"`
+	ConnectionID uuid.UUID  `db:"connection_id"`
+	ProjectID    *uuid.UUID `db:"project_id"`
+	Name         string     `db:"name"`
+	Level        string     `db:"level"`
+	IsActive     bool       `db:"is_active"`
+	CreatedAt    time.Time  `db:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"`
+}
+
+func toDBAlertRule(r integrationbus.AlertRule) alertRuleDB {
+	return alertRuleDB{
+		ID:           r.ID,
+		OrgID:        r.OrgID,
+		ConnectionID: r.ConnectionID,
+		ProjectID:    r.ProjectID,
+		Name:         r.Name,
+		Level:        r.Level,
+		IsActive:     r.IsActive,
+		CreatedAt:    r.CreatedAt.UTC(),
+		UpdatedAt:    r.UpdatedAt.UTC(),
+	}
+}
+
+func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
+	return integrationbus.AlertRule{
+		ID:           db.ID,
+		OrgID:        db.OrgID,
+		ConnectionID: db.ConnectionID,
+		ProjectID:    db.ProjectID,
+		Name:         db.Name,
+		Level:        db.Level,
+		IsActive:     db.IsActive,
+		CreatedAt:    db.CreatedAt,
+		UpdatedAt:    db.UpdatedAt,
+	}
+}
+
 // integrationDB is the database representation of a configured integration.
 type integrationDB struct {
 	ID             uuid.UUID `db:"id"`

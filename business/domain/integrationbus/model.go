@@ -8,6 +8,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// ValidLevels is the set of accepted alert levels.
+var ValidLevels = map[string]bool{
+	"DEBUG": true,
+	"INFO":  true,
+	"WARN":  true,
+	"ERROR": true,
+}
+
 // ProviderField defines one user-facing input on a provider form.
 type ProviderField struct {
 	Key         string `json:"k"`
@@ -65,4 +73,39 @@ type AlertPayload struct {
 // Caller is implemented by each integration provider to deliver an alert.
 type Caller interface {
 	Send(ctx context.Context, creds map[string]string, payload AlertPayload) error
+}
+
+// =============================================================================
+// Alert Rules
+
+// AlertRule is a configured alert rule for an org.
+type AlertRule struct {
+	ID           uuid.UUID
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	ProjectID    *uuid.UUID
+	Name         string
+	Level        string
+	IsActive     bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// NewAlertRule contains the information needed to create a new alert rule.
+type NewAlertRule struct {
+	OrgID        uuid.UUID
+	ConnectionID uuid.UUID
+	ProjectID    *uuid.UUID
+	Name         string
+	Level        string
+	IsActive     bool
+}
+
+// UpdateAlertRule contains the optional fields that can be updated on a rule.
+type UpdateAlertRule struct {
+	Name         *string
+	Level        *string
+	ConnectionID *uuid.UUID
+	ProjectID    **uuid.UUID // outer pointer = field present; inner pointer = nullable value
+	IsActive     *bool
 }

@@ -39,4 +39,11 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}/integrations/{integration_id}", a.update, authen, ruleOrgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/integrations/{integration_id}", a.delete, authen, ruleOrgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/integrations/{integration_id}/test", a.test, authen, ruleOrgAdmin)
+
+	// Alert rules.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRules, authen)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/rules", a.createRule, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}/rules/{rule_id}", a.updateRule, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodPatch, version, "/orgs/{org_id}/rules/{rule_id}/toggle", a.toggleRule, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/rules/{rule_id}", a.deleteRule, authen, ruleOrgAdmin)
 }

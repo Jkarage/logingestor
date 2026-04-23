@@ -116,6 +116,9 @@ var (
 	// system has been broken. If you see one of these errors,
 	// something is very broken. The error message is not sent to the client.
 	InternalOnlyLog = ErrCode{value: 19}
+
+	// BadGateway indicates an upstream provider returned an error or invalid response.
+	BadGateway = ErrCode{value: 20}
 )
 
 var codeNumbers = map[string]ErrCode{
@@ -139,6 +142,7 @@ var codeNumbers = map[string]ErrCode{
 	"unauthenticated":     Unauthenticated,
 	"too_many_requests":   TooManyRequests,
 	"internal_only_log":   InternalOnlyLog,
+	"bad_gateway":         BadGateway,
 }
 
 var codeNames = map[ErrCode]string{
@@ -162,6 +166,7 @@ var codeNames = map[ErrCode]string{
 	Unauthenticated:    "unauthenticated",
 	TooManyRequests:    "too_many_requests",
 	InternalOnlyLog:    "internal_only_log",
+	BadGateway:         "bad_gateway",
 }
 
 var httpStatus = map[ErrCode]int{
@@ -185,4 +190,5 @@ var httpStatus = map[ErrCode]int{
 	Unauthenticated:    http.StatusUnauthorized,
 	TooManyRequests:    http.StatusTooManyRequests,
 	InternalOnlyLog:    http.StatusInternalServerError,
+	BadGateway:         http.StatusBadGateway,
 }
