@@ -318,6 +318,51 @@ func (s *Store) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]integra
 	return rules, nil
 }
 
+// QueryMatchingRules returns active rules whose level is in the provided list and
+// whose project_id is NULL (org-wide) or matches the given projectID.
+func (s *Store) QueryMatchingRules(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, levels []string) ([]integrationbus.AlertRule, error) {
+	if len(levels) == 0 {
+		return nil, nil
+	}
+
+	var projID any
+	if projectID != nil {
+		projID = projectID.String()
+	}
+
+	data := struct {
+		OrgID     string `db:"org_id"`
+		ProjectID any    `db:"project_id"`
+		Levels    []any  `db:"levels"`
+	}{
+		OrgID:     orgID.String(),
+		ProjectID: projID,
+	}
+	for _, l := range levels {
+		data.Levels = append(data.Levels, l)
+	}
+
+	const q = `
+	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	FROM alert_rules
+	WHERE org_id = :org_id
+	  AND is_active = true
+	  AND level IN (:levels)
+	  AND (project_id IS NULL OR project_id = :project_id)`
+
+	var dbs []alertRuleDB
+	if err := sqldb.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &dbs); err != nil {
+		return nil, fmt.Errorf("namedquerysliceusingin: %w", err)
+	}
+
+	rules := make([]integrationbus.AlertRule, len(dbs))
+	for i, db := range dbs {
+		rules[i] = toBusAlertRule(db)
+	}
+
+	return rules, nil
+}
+
 // DisableRulesByConnection sets is_active=false on all rules referencing a connection.
 func (s *Store) DisableRulesByConnection(ctx context.Context, connectionID uuid.UUID) error {
 	data := struct {

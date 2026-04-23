@@ -36,6 +36,7 @@ type Storer interface {
 	QueryRuleByID(ctx context.Context, id uuid.UUID) (AlertRule, error)
 	QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]AlertRule, error)
 	DisableRulesByConnection(ctx context.Context, connectionID uuid.UUID) error
+	QueryMatchingRules(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, levels []string) ([]AlertRule, error)
 }
 
 // Business manages the set of APIs for the integration domain.
@@ -268,4 +269,61 @@ func (b *Business) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]Aler
 		return nil, fmt.Errorf("queryrulesbyorg: %w", err)
 	}
 	return rules, nil
+}
+
+// levelThreshold returns all rule levels that should fire for a given log level.
+// A rule fires when its configured level <= the log's level in severity.
+func levelThreshold(logLevel string) []string {
+	order := []string{"DEBUG", "INFO", "WARN", "ERROR"}
+	for i, l := range order {
+		if l == logLevel {
+			return order[:i+1]
+		}
+	}
+	return nil
+}
+
+// SendAlert decrypts credentials for connectionID and delivers payload to the provider.
+func (b *Business) SendAlert(ctx context.Context, connectionID uuid.UUID, payload AlertPayload) error {
+	integration, err := b.storer.QueryByID(ctx, connectionID)
+	if err != nil {
+		return fmt.Errorf("sendalert: querybyid: %w", err)
+	}
+
+	if !integration.Enabled {
+		return nil
+	}
+
+	caller, ok := b.callers[integration.ProviderID]
+	if !ok {
+		return fmt.Errorf("sendalert: unknown provider %q", integration.ProviderID)
+	}
+
+	if err := caller.Send(ctx, integration.Credentials, payload); err != nil {
+		return fmt.Errorf("sendalert: send: %w", err)
+	}
+
+	return nil
+}
+
+// FireAlerts finds all active rules matching the log event and delivers alerts.
+// projectID may be nil when the log has no associated project.
+func (b *Business) FireAlerts(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, payload AlertPayload) error {
+	levels := levelThreshold(payload.Level)
+	if len(levels) == 0 {
+		return nil
+	}
+
+	rules, err := b.storer.QueryMatchingRules(ctx, orgID, projectID, levels)
+	if err != nil {
+		return fmt.Errorf("firealerts: querymatchingrules: %w", err)
+	}
+
+	for _, rule := range rules {
+		if err := b.SendAlert(ctx, rule.ConnectionID, payload); err != nil {
+			b.log.Error(ctx, "firealerts: send alert", "ruleID", rule.ID, "connectionID", rule.ConnectionID, "err", err)
+		}
+	}
+
+	return nil
 }

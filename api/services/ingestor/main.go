@@ -33,6 +33,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/invitationbus/extensions/invitationotel"
 	"github.com/jkarage/logingestor/business/domain/invitationbus/stores/invitationdb"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/logbus/extensions/logalert"
 	"github.com/jkarage/logingestor/business/domain/logbus/extensions/logotel"
 	"github.com/jkarage/logingestor/business/domain/logbus/stores/logdb"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
@@ -221,9 +222,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 	invitationStorage := invitationdb.NewStore(log, db)
 	invitationBus := invitationbus.NewBusiness(log, delegate, invitationStorage, invitationOtelExt, invitationAuditExt)
 
-	logOtelExt := logotel.NewExtension()
 	logStorage := logdb.NewStore(log, db)
-	logBus := logbus.NewBusiness(log, logStorage, logOtelExt)
 
 	hub := logapp.NewHub()
 
@@ -289,6 +288,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	integrationStorage := integrationdb.NewStore(log, db, encKey)
 	integrationBus := integrationbus.NewBusiness(log, integrationStorage, integrationCallers)
+
+	logOtelExt := logotel.NewExtension()
+	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
+	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
 
 	// -------------------------------------------------------------------------
 	// Start Debug Service
