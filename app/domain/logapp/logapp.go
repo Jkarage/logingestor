@@ -3,6 +3,7 @@ package logapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/types/role"
@@ -24,12 +26,13 @@ type app struct {
 	log        *logger.Logger
 	logBus     logbus.ExtBusiness
 	projectBus projectbus.ExtBusiness
+	analyzeBus *analyzebus.Business
 	hub        *Hub
 	authClient authclient.Authenticator
 	upgrader   websocket.Upgrader
 }
 
-func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
+func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, analyzeBus *analyzebus.Business, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
 	// Build an origin set for O(1) lookup.
 	originSet := make(map[string]struct{}, len(allowedOrigins))
 	for _, o := range allowedOrigins {
@@ -49,6 +52,7 @@ func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus
 		log:        log,
 		logBus:     logBus,
 		projectBus: projectBus,
+		analyzeBus: analyzeBus,
 		hub:        hub,
 		authClient: authClient,
 		upgrader: websocket.Upgrader{
@@ -213,6 +217,38 @@ func (a *app) stats(ctx context.Context, r *http.Request) web.Encoder {
 	}
 
 	return StatsResponse(counts)
+}
+
+// analyze handles POST /v1/projects/{project_id}/logs/{log_id}/analyze.
+func (a *app) analyze(ctx context.Context, r *http.Request) web.Encoder {
+	projectID, err := uuid.Parse(web.Param(r, "project_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	logID, err := uuid.Parse(web.Param(r, "log_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	l, err := a.logBus.QueryByID(ctx, logID)
+	if err != nil {
+		if errors.Is(err, logbus.ErrNotFound) {
+			return errs.New(errs.NotFound, err)
+		}
+		return errs.Errorf(errs.Internal, "querybyid: %s", err)
+	}
+
+	if l.ProjectID != projectID {
+		return errs.New(errs.NotFound, logbus.ErrNotFound)
+	}
+
+	analysis, err := a.analyzeBus.Analyze(ctx, l)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "analyze: %s", err)
+	}
+
+	return AnalyzeResponse(analysis)
 }
 
 // stream handles GET /v1/projects/{project_id}/logs/stream (WebSocket).

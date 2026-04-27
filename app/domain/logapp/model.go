@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
+	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 )
 
@@ -185,6 +186,17 @@ func (r LogsResponse) Encode() ([]byte, string, error) {
 type StatsResponse map[string]int
 
 func (r StatsResponse) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(r)
+	return data, "application/json", err
+}
+
+// =============================================================================
+// Analyze response
+
+// AnalyzeResponse is returned by POST /projects/{project_id}/logs/{log_id}/analyze.
+type AnalyzeResponse analyzebus.Analysis
+
+func (r AnalyzeResponse) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(r)
 	return data, "application/json", err
 }

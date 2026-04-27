@@ -84,6 +84,10 @@ func (ext *Extension) dispatch(logs []logbus.Log) {
 	}
 }
 
+func (ext *Extension) QueryByID(ctx context.Context, id uuid.UUID) (logbus.Log, error) {
+	return ext.bus.QueryByID(ctx, id)
+}
+
 func (ext *Extension) Query(ctx context.Context, filter logbus.QueryFilter, limit int, cursor string) (logbus.QueryResult, error) {
 	return ext.bus.Query(ctx, filter, limit, cursor)
 }

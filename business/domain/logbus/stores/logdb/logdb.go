@@ -4,6 +4,7 @@ package logdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -40,6 +41,28 @@ func (s *Store) BulkInsert(ctx context.Context, logs []logbus.Log) error {
 	}
 
 	return nil
+}
+
+// QueryByID returns the log with the given id.
+func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) (logbus.Log, error) {
+	data := struct {
+		ID string `db:"id"`
+	}{ID: id.String()}
+
+	const q = `
+	SELECT id, project_id, level, message, source, ts, tags, meta
+	FROM logs
+	WHERE id = :id`
+
+	var db logDB
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &db); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return logbus.Log{}, fmt.Errorf("db: %w", logbus.ErrNotFound)
+		}
+		return logbus.Log{}, fmt.Errorf("db: %w", err)
+	}
+
+	return toBusLog(db)
 }
 
 // Query returns logs matching filter, ordered ts DESC.

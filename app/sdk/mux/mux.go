@@ -10,6 +10,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
@@ -75,6 +76,7 @@ type BusConfig struct {
 	InvitationBus  invitationbus.ExtBusiness
 	LogBus         logbus.ExtBusiness
 	IntegrationBus *integrationbus.Business
+	AnalyzeBus     *analyzebus.Business
 }
 
 // Config contains all the mandatory systems required by handlers.

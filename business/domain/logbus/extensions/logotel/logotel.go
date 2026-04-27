@@ -21,6 +21,13 @@ func NewExtension() logbus.Extension {
 	}
 }
 
+func (ext *Extension) QueryByID(ctx context.Context, id uuid.UUID) (logbus.Log, error) {
+	ctx, span := otel.AddSpan(ctx, "business.logbus.querybyid")
+	defer span.End()
+
+	return ext.bus.QueryByID(ctx, id)
+}
+
 func (ext *Extension) BulkCreate(ctx context.Context, entries []logbus.NewLog) ([]logbus.Log, error) {
 	ctx, span := otel.AddSpan(ctx, "business.logbus.bulkcreate")
 	defer span.End()

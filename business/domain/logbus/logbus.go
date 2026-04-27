@@ -15,6 +15,7 @@ import (
 // retrieve data.
 type Storer interface {
 	BulkInsert(ctx context.Context, logs []Log) error
+	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, afterTs *time.Time, afterID *uuid.UUID) ([]Log, int, error)
 	Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error)
 }
@@ -23,6 +24,7 @@ type Storer interface {
 // functionality around the core business logic.
 type ExtBusiness interface {
 	BulkCreate(ctx context.Context, entries []NewLog) ([]Log, error)
+	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, cursor string) (QueryResult, error)
 	Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error)
 }
@@ -84,6 +86,15 @@ func (b *Business) BulkCreate(ctx context.Context, entries []NewLog) ([]Log, err
 	}
 
 	return logs, nil
+}
+
+// QueryByID returns the log identified by id.
+func (b *Business) QueryByID(ctx context.Context, id uuid.UUID) (Log, error) {
+	l, err := b.storer.QueryByID(ctx, id)
+	if err != nil {
+		return Log{}, fmt.Errorf("querybyid: %w", err)
+	}
+	return l, nil
 }
 
 // Query returns a filtered, cursor-paginated page of logs for a project.

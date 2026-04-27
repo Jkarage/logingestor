@@ -22,6 +22,7 @@ import (
 	http2 "github.com/jkarage/logingestor/app/sdk/authclient/http"
 	"github.com/jkarage/logingestor/app/sdk/debug"
 	"github.com/jkarage/logingestor/app/sdk/mux"
+	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
@@ -137,6 +138,9 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// EncryptionKey must be a 64-character hex string (32 bytes → AES-256).
 			// Generate with: openssl rand -hex 32
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
+		}
+		AI struct {
+			AnthropicKey string `conf:"default:,env:ANTHROPIC_API_KEY,mask"`
 		}
 	}{
 		Version: conf.Version{
@@ -293,6 +297,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
 
+	analyzeBus := analyzebus.NewBusiness(log, cfg.AI.AnthropicKey)
+
 	// -------------------------------------------------------------------------
 	// Start Debug Service
 
@@ -322,6 +328,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			InvitationBus:  invitationBus,
 			LogBus:         logBus,
 			IntegrationBus: integrationBus,
+			AnalyzeBus:     analyzeBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

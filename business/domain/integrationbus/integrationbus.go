@@ -12,13 +12,13 @@ import (
 
 // Set of error variables for CRUD operations.
 var (
-	ErrNotFound          = errors.New("integration not found")
-	ErrDuplicateName     = errors.New("integration name already exists for this provider in org")
-	ErrUnknownProvider   = errors.New("unknown integration provider")
-	ErrProviderRejected  = errors.New("provider rejected the request")
-	ErrRuleNotFound      = errors.New("alert rule not found")
-	ErrInvalidLevel      = errors.New("level must be one of DEBUG, INFO, WARN, ERROR")
-	ErrConnectionBadOrg  = errors.New("connection does not belong to this org")
+	ErrNotFound         = errors.New("integration not found")
+	ErrDuplicateName    = errors.New("integration name already exists for this provider in org")
+	ErrUnknownProvider  = errors.New("unknown integration provider")
+	ErrProviderRejected = errors.New("provider rejected the request")
+	ErrRuleNotFound     = errors.New("alert rule not found")
+	ErrInvalidLevel     = errors.New("level must be one of DEBUG, INFO, WARN, ERROR")
+	ErrConnectionBadOrg = errors.New("connection does not belong to this org")
 )
 
 // Storer declares the persistence behaviour this package needs.
@@ -162,9 +162,9 @@ func (b *Business) Test(ctx context.Context, i Integration) error {
 	payload := AlertPayload{
 		ProjectName: "Test Project",
 		Level:       "INFO",
-		Message:     "This is a test alert from LoginGestor. Your integration is working correctly.",
+		Message:     "This is a test alert from streamlogia. Your integration is working correctly.",
 		Source:      "logingestor/test",
-		LogID:       "00000000-0000-0000-0000-000000000000",
+		LogID:       "12345678-1234-1234-1234-12345678",
 		Timestamp:   time.Now(),
 	}
 
