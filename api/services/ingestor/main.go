@@ -140,7 +140,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
 		}
 		AI struct {
-			AnthropicKey string `conf:"default:,env:ANTHROPIC_API_KEY,mask"`
+			AnthropicAPIKey string `conf:"default:xxxxxxxxxxxx,env:AI_ANTHROPIC_API_KEY,mask"`
 		}
 	}{
 		Version: conf.Version{
@@ -297,7 +297,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
 
-	analyzeBus := analyzebus.NewBusiness(log, cfg.AI.AnthropicKey)
+	analyzeBus := analyzebus.NewBusiness(log, cfg.AI.AnthropicAPIKey)
 
 	// -------------------------------------------------------------------------
 	// Start Debug Service
