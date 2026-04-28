@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jkarage/logingestor/business/domain/logbus"
@@ -34,7 +35,7 @@ type Business struct {
 func NewBusiness(log *logger.Logger, baseURL, apiKey string) *Business {
 	return &Business{
 		log:        log,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: &http.Client{Timeout: 120 * time.Second},
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 	}
@@ -151,10 +152,33 @@ func (b *Business) Analyze(ctx context.Context, l logbus.Log) (Analysis, error) 
 		return Analysis{}, fmt.Errorf("empty content in response")
 	}
 
+	text = extractJSON(text)
+
 	var result Analysis
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
-		return Analysis{}, fmt.Errorf("parse model output: %w: %s", err, text)
+		b.log.Error(ctx, "analyzebus: parse model output", "raw", text, "err", err)
+		return Analysis{}, fmt.Errorf("parse model output: %w", err)
 	}
 
 	return result, nil
+}
+
+// extractJSON strips markdown code fences and surrounding whitespace so the
+// raw model output can be passed directly to json.Unmarshal.
+func extractJSON(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Strip opening fence: ```json or ```
+	if strings.HasPrefix(s, "```") {
+		if idx := strings.Index(s, "\n"); idx != -1 {
+			s = s[idx+1:]
+		}
+	}
+
+	// Strip closing fence
+	if idx := strings.LastIndex(s, "```"); idx != -1 {
+		s = s[:idx]
+	}
+
+	return strings.TrimSpace(s)
 }
