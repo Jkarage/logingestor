@@ -140,8 +140,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
 		}
 		AI struct {
-			CerebriumAPIKey  string `conf:"default:,env:AI_CEREBRIUM_API_KEY,mask"`
-			CerebriumBaseURL string `conf:"default:,env:AI_CEREBRIUM_BASE_URL"`
+			CerebriumAPIKey  string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_API_KEY,mask"`
+			CerebriumBaseURL string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_BASE_URL"`
 		}
 	}{
 		Version: conf.Version{
