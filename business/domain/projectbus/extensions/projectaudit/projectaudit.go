@@ -42,11 +42,12 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, np projectb
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "created",
+		Action:    "project.created",
 		Data:      np,
 		Message:   "project created",
 	}); err != nil {
@@ -63,11 +64,12 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, project pro
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "updated",
+		Action:    "project.renamed",
 		Data:      up,
 		Message:   "project updated",
 	}); err != nil {
@@ -83,11 +85,12 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, project pro
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "deleted",
+		Action:    "project.deleted",
 		Data:      nil,
 		Message:   "project deleted",
 	}); err != nil {

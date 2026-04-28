@@ -42,6 +42,8 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	auditapp.Routes(app, auditapp.Config{
 		Log:        cfg.Log,
 		AuditBus:   cfg.BusConfig.AuditBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
+		UserBus:    cfg.BusConfig.UserBus,
 		AuthClient: cfg.IngestorConfig.AuthClient,
 	})
 
@@ -95,6 +97,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AuthClient:     cfg.IngestorConfig.AuthClient,
 		UserBus:        cfg.BusConfig.UserBus,
 		IntegrationBus: cfg.BusConfig.IntegrationBus,
+		AuditBus:       cfg.BusConfig.AuditBus,
 	})
 
 }

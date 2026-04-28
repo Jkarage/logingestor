@@ -5,10 +5,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
+	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/app/sdk/query"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
-	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -24,13 +25,14 @@ func newApp(auditBus auditbus.ExtBusiness) *app {
 	}
 }
 
+// query returns all audit records (platform-wide, super_admin only).
 func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	qp, err := parseQueryParams(r)
 	if err != nil {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	page, err := page.Parse(qp.Page, qp.Rows)
+	pg, err := page.Parse(qp.Page, qp.Rows)
 	if err != nil {
 		return errs.NewFieldErrors("page", err)
 	}
@@ -40,12 +42,12 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return err.(*errs.Error)
 	}
 
-	orderBy, err := order.Parse(orderByFields, qp.OrderBy, userbus.DefaultOrderBy)
+	orderBy, err := order.Parse(orderByFields, qp.OrderBy, auditbus.DefaultOrderBy)
 	if err != nil {
 		return errs.NewFieldErrors("order", err)
 	}
 
-	adts, err := a.auditBus.Query(ctx, filter, orderBy, page)
+	adts, err := a.auditBus.Query(ctx, filter, orderBy, pg)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "query: %s", err)
 	}
@@ -55,5 +57,48 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
-	return query.NewResult(toAppAudits(adts), total, page)
+	return query.NewResult(toAppAudits(adts), total, pg)
+}
+
+// queryByOrg returns audit records scoped to a specific org (org_admin + super_admin).
+func (a *app) queryByOrg(ctx context.Context, r *http.Request) web.Encoder {
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	qp, err := parseQueryParams(r)
+	if err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	}
+
+	pg, err := page.Parse(qp.Page, qp.Rows)
+	if err != nil {
+		return errs.NewFieldErrors("page", err)
+	}
+
+	filter, err := parseFilter(qp)
+	if err != nil {
+		return err.(*errs.Error)
+	}
+
+	// Scope results to this org regardless of any query param.
+	filter.OrgID = &orgID
+
+	orderBy, err := order.Parse(orderByFields, qp.OrderBy, auditbus.DefaultOrderBy)
+	if err != nil {
+		return errs.NewFieldErrors("order", err)
+	}
+
+	adts, err := a.auditBus.Query(ctx, filter, orderBy, pg)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "query: %s", err)
+	}
+
+	total, err := a.auditBus.Count(ctx, filter)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "count: %s", err)
+	}
+
+	return query.NewResult(toAppAudits(adts), total, pg)
 }

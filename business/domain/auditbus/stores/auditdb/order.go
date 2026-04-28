@@ -8,11 +8,12 @@ import (
 )
 
 var orderByFields = map[string]string{
-	auditbus.OrderByObjID:     "obj_id",
-	auditbus.OrderByObjDomain: "obj_domain",
-	auditbus.OrderByObjName:   "obj_name",
-	auditbus.OrderByActorID:   "actor_id",
-	auditbus.OrderByAction:    "action",
+	auditbus.OrderByObjID:     "a.obj_id",
+	auditbus.OrderByObjDomain: "a.obj_domain",
+	auditbus.OrderByObjName:   "a.obj_name",
+	auditbus.OrderByActorID:   "a.actor_id",
+	auditbus.OrderByAction:    "a.action",
+	auditbus.OrderByTimestamp: "a.timestamp",
 }
 
 func orderByClause(orderBy order.By) (string, error) {

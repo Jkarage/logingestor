@@ -244,3 +244,8 @@ CREATE TABLE IF NOT EXISTS alert_rules (
 );
 CREATE INDEX IF NOT EXISTS alert_rules_org_idx        ON alert_rules(org_id);
 CREATE INDEX IF NOT EXISTS alert_rules_connection_idx ON alert_rules(connection_id);
+-- Version: 1.17
+-- Description: Add org_id to audit table for org-scoped audit log queries
+ALTER TABLE audit
+ADD COLUMN IF NOT EXISTS org_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+CREATE INDEX IF NOT EXISTS idx_audit_org_ts ON audit (org_id, timestamp DESC);

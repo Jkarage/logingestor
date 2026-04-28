@@ -46,11 +46,12 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu orgbus.N
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   actorID,
-		Action:    "created",
+		Action:    "org.created",
 		Data:      nu,
 		Message:   "org created",
 	}); err != nil {
@@ -67,11 +68,12 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, org orgbus.
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   actorID,
-		Action:    "updated",
+		Action:    "org.renamed",
 		Data:      uu,
 		Message:   "org updated",
 	}); err != nil {
@@ -87,11 +89,12 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, org orgbus.
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   actorID,
-		Action:    "deleted",
+		Action:    "org.deleted",
 		Data:      nil,
 		Message:   "org deleted",
 	}); err != nil {
@@ -141,11 +144,12 @@ func (ext *Extension) Suspend(ctx context.Context, orgID uuid.UUID) error {
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   orgID,
-		Action:    "suspended",
+		Action:    "org.suspended",
 		Data:      nil,
 		Message:   "org suspended",
 	}); err != nil {
@@ -170,11 +174,12 @@ func (ext *Extension) AddMember(ctx context.Context, actorID uuid.UUID, nm orgbu
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     nm.OrgID,
 		ObjID:     member.MemberID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   actorID,
-		Action:    "member_added",
+		Action:    "user.joined",
 		Data:      nm,
 		Message:   "member added to org",
 	}); err != nil {
@@ -194,7 +199,7 @@ func (ext *Extension) RemoveMember(ctx context.Context, actorID uuid.UUID, membe
 		ObjDomain: domain.Org,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "member_removed",
+		Action:    "user.removed",
 		Data:      nil,
 		Message:   "member removed from org",
 	}); err != nil {
@@ -216,11 +221,12 @@ func (ext *Extension) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, m
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     member.OrgID,
 		ObjID:     memberID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
 		ActorID:   actorID,
-		Action:    "member_role_updated",
+		Action:    "user.role_changed",
 		Data:      map[string]string{"role": r.String()},
 		Message:   "member role updated",
 	}); err != nil {
@@ -255,6 +261,7 @@ func (ext *Extension) CreateSubscription(ctx context.Context, actorID uuid.UUID,
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     ns.OrgID,
 		ObjID:     sub.SubscriptionID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,
@@ -281,6 +288,7 @@ func (ext *Extension) UpdateSubscription(ctx context.Context, actorID uuid.UUID,
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     sub.OrgID,
 		ObjID:     sub.SubscriptionID,
 		ObjDomain: domain.Org,
 		ObjName:   org.Name,

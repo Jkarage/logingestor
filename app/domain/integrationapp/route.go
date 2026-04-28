@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/foundation/logger"
@@ -19,6 +20,7 @@ type Config struct {
 	AuthClient     authclient.Authenticator
 	UserBus        userbus.ExtBusiness
 	IntegrationBus *integrationbus.Business
+	AuditBus       auditbus.ExtBusiness
 }
 
 // Routes adds specific routes for this group.
@@ -28,7 +30,7 @@ func Routes(app *web.App, cfg Config) {
 	authen := mid.Authenticate(cfg.AuthClient)
 	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
 
-	a := newApp(cfg.IntegrationBus)
+	a := newApp(cfg.IntegrationBus, cfg.AuditBus)
 
 	// Provider catalog — authenticated but no org-admin requirement.
 	app.HandlerFunc(http.MethodGet, version, "/integration-providers", a.listProviders, authen)

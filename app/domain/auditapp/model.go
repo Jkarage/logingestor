@@ -9,15 +9,17 @@ import (
 
 // Audit represents information about an individual audit record.
 type Audit struct {
-	ID        string `json:"id"`
-	ObjID     string `json:"obj_id"`
-	ObjDomain string `json:"obj_domain"`
-	ObjName   string `json:"obj_name"`
-	ActorID   string `json:"actor_id"`
-	Action    string `json:"action"`
-	Data      string `json:"data"`
-	Message   string `json:"message"`
-	Timestamp string `json:"timestamp"`
+	ID        string          `json:"id"`
+	OrgID     string          `json:"orgId"`
+	ObjID     string          `json:"targetId"`
+	ObjDomain string          `json:"targetType"`
+	ObjName   string          `json:"targetName"`
+	ActorID   string          `json:"actorId"`
+	ActorName string          `json:"actorName"`
+	Action    string          `json:"action"`
+	Data      json.RawMessage `json:"meta"`
+	Message   string          `json:"message"`
+	Timestamp string          `json:"createdAt"`
 }
 
 // Encode implements the encoder interface.
@@ -27,14 +29,21 @@ func (app Audit) Encode() ([]byte, string, error) {
 }
 
 func toAppAudit(bus auditbus.Audit) Audit {
+	meta := bus.Data
+	if len(meta) == 0 {
+		meta = json.RawMessage("{}")
+	}
+
 	return Audit{
 		ID:        bus.ID.String(),
+		OrgID:     bus.OrgID.String(),
 		ObjID:     bus.ObjID.String(),
 		ObjDomain: bus.ObjDomain.String(),
 		ObjName:   bus.ObjName.String(),
 		ActorID:   bus.ActorID.String(),
+		ActorName: bus.ActorName,
 		Action:    bus.Action,
-		Data:      string(bus.Data),
+		Data:      meta,
 		Message:   bus.Message,
 		Timestamp: bus.Timestamp.Format(time.RFC3339),
 	}

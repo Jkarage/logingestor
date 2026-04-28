@@ -5,12 +5,14 @@ import "fmt"
 
 // The set of roles that can be used.
 var (
-	User       = newDomain("USER")
-	Product    = newDomain("PRODUCT")
-	Home       = newDomain("HOME")
-	Org        = newDomain("ORG")
-	Project    = newDomain("PROJECT")
-	Invitation = newDomain("INVITATION")
+	User        = newDomain("USER")
+	Product     = newDomain("PRODUCT")
+	Home        = newDomain("HOME")
+	Org         = newDomain("ORG")
+	Project     = newDomain("PROJECT")
+	Invitation  = newDomain("INVITATION")
+	Integration = newDomain("INTEGRATION")
+	Rule        = newDomain("RULE")
 )
 
 // =============================================================================

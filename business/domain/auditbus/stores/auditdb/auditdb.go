@@ -32,9 +32,9 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 func (s *Store) Create(ctx context.Context, a auditbus.Audit) error {
 	const q = `
 	INSERT INTO audit
-		(id, obj_id, obj_domain, obj_name, actor_id, action, data, message, timestamp)
+		(id, org_id, obj_id, obj_domain, obj_name, actor_id, action, data, message, timestamp)
 	VALUES
-		(:id, :obj_id, :obj_domain, :obj_name, :actor_id, :action, :data, :message, :timestamp)`
+		(:id, :org_id, :obj_id, :obj_domain, :obj_name, :actor_id, :action, :data, :message, :timestamp)`
 
 	dbAudit, err := toDBAudit(a)
 	if err != nil {
@@ -56,9 +56,11 @@ func (s *Store) Query(ctx context.Context, filter auditbus.QueryFilter, orderBy 
 
 	const q = `
 	SELECT
-		id, obj_id, obj_domain, obj_name, actor_id, action, data, message, timestamp
+		a.id, a.org_id, a.obj_id, a.obj_domain, a.obj_name, a.actor_id, a.action, a.data, a.message, a.timestamp,
+		COALESCE(u.name, '') AS actor_name
 	FROM
-		audit
+		audit a
+	LEFT JOIN users u ON u.id = a.actor_id
 	`
 
 	buf := bytes.NewBufferString(q)
@@ -80,7 +82,7 @@ func (s *Store) Query(ctx context.Context, filter auditbus.QueryFilter, orderBy 
 	return toBusAudits(dbAudits)
 }
 
-// Count returns the total number of users in the DB.
+// Count returns the total number of audit records matching the filter.
 func (s *Store) Count(ctx context.Context, filter auditbus.QueryFilter) (int, error) {
 	data := map[string]any{}
 
@@ -88,7 +90,7 @@ func (s *Store) Count(ctx context.Context, filter auditbus.QueryFilter) (int, er
 	SELECT
 		count(1)
 	FROM
-		audit`
+		audit a`
 
 	buf := bytes.NewBufferString(q)
 	applyFilter(filter, data, buf)

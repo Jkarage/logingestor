@@ -14,10 +14,12 @@ import (
 
 type audit struct {
 	ID        uuid.UUID          `db:"id"`
+	OrgID     uuid.UUID          `db:"org_id"`
 	ObjID     uuid.UUID          `db:"obj_id"`
 	ObjDomain string             `db:"obj_domain"`
 	ObjName   string             `db:"obj_name"`
 	ActorID   uuid.UUID          `db:"actor_id"`
+	ActorName string             `db:"actor_name"`
 	Action    string             `db:"action"`
 	Data      types.NullJSONText `db:"data"`
 	Message   string             `db:"message"`
@@ -27,6 +29,7 @@ type audit struct {
 func toDBAudit(bus auditbus.Audit) (audit, error) {
 	db := audit{
 		ID:        bus.ID,
+		OrgID:     bus.OrgID,
 		ObjID:     bus.ObjID,
 		ObjDomain: bus.ObjDomain.String(),
 		ObjName:   bus.ObjName.String(),
@@ -41,22 +44,29 @@ func toDBAudit(bus auditbus.Audit) (audit, error) {
 }
 
 func toBusAudit(db audit) (auditbus.Audit, error) {
-	domain, err := domain.Parse(db.ObjDomain)
+	d, err := domain.Parse(db.ObjDomain)
 	if err != nil {
 		return auditbus.Audit{}, fmt.Errorf("parse domain: %w", err)
 	}
 
-	name, err := name.Parse(db.ObjName)
-	if err != nil {
-		return auditbus.Audit{}, fmt.Errorf("parse name: %w", err)
+	// ObjName is a snapshot; tolerate empty or non-conforming values.
+	var n name.Name
+	if db.ObjName != "" {
+		n, err = name.Parse(db.ObjName)
+		if err != nil {
+			// Stored snapshot may not match current validation; use zero value.
+			n = name.Name{}
+		}
 	}
 
 	bus := auditbus.Audit{
 		ID:        db.ID,
+		OrgID:     db.OrgID,
 		ObjID:     db.ObjID,
-		ObjDomain: domain,
-		ObjName:   name,
+		ObjDomain: d,
+		ObjName:   n,
 		ActorID:   db.ActorID,
+		ActorName: db.ActorName,
 		Action:    db.Action,
 		Data:      json.RawMessage(db.Data.JSONText),
 		Message:   db.Message,

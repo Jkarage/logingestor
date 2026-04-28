@@ -37,11 +37,12 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, ni invitati
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     ni.OrgID,
 		ObjID:     inv.ID,
 		ObjDomain: domain.Invitation,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "created",
+		Action:    "user.invited",
 		Data:      ni,
 		Message:   "invitation sent to " + ni.Email,
 	}); err != nil {
@@ -52,16 +53,22 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, ni invitati
 }
 
 func (ext *Extension) Revoke(ctx context.Context, actorID uuid.UUID, invID uuid.UUID) error {
+	inv, err := ext.bus.QueryByID(ctx, invID)
+	if err != nil {
+		return err
+	}
+
 	if err := ext.bus.Revoke(ctx, actorID, invID); err != nil {
 		return err
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     inv.OrgID,
 		ObjID:     invID,
 		ObjDomain: domain.Invitation,
 		ObjName:   name.Name{},
 		ActorID:   actorID,
-		Action:    "revoked",
+		Action:    "user.invite_cancelled",
 		Data:      nil,
 		Message:   "invitation revoked",
 	}); err != nil {

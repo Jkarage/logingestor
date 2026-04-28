@@ -11,16 +11,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
+	"github.com/jkarage/logingestor/business/types/domain"
+	"github.com/jkarage/logingestor/business/types/name"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
 type app struct {
 	integrationBus *integrationbus.Business
+	auditBus       auditbus.ExtBusiness
 }
 
-func newApp(integrationBus *integrationbus.Business) *app {
-	return &app{integrationBus: integrationBus}
+func newApp(integrationBus *integrationbus.Business, auditBus auditbus.ExtBusiness) *app {
+	return &app{integrationBus: integrationBus, auditBus: auditBus}
 }
 
 // listProviders handles GET /v1/integration-providers.
@@ -65,7 +69,9 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	}
 	busNew.OrgID = orgID
 
-	integration, err := a.integrationBus.Create(ctx, mid.GetSubjectID(ctx), busNew)
+	actorID := mid.GetSubjectID(ctx)
+
+	integration, err := a.integrationBus.Create(ctx, actorID, busNew)
 	if err != nil {
 		if errors.Is(err, integrationbus.ErrUnknownProvider) {
 			return errs.New(errs.InvalidArgument, integrationbus.ErrUnknownProvider)
@@ -75,6 +81,17 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		}
 		return errs.Errorf(errs.Internal, "create: %s", err)
 	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     integration.ID,
+		ObjDomain: domain.Integration,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "integration.connected",
+		Data:      map[string]string{"provider": integration.ProviderID, "name": integration.Name},
+		Message:   "integration connected",
+	})
 
 	return toAppIntegration(integration)
 }
@@ -123,9 +140,22 @@ func (a *app) delete(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "querybyid: integrationID[%s]: %s", integrationID, err)
 	}
 
-	if err := a.integrationBus.Disable(ctx, mid.GetSubjectID(ctx), integration); err != nil {
+	actorID := mid.GetSubjectID(ctx)
+
+	if err := a.integrationBus.Disable(ctx, actorID, integration); err != nil {
 		return errs.Errorf(errs.Internal, "disable: integrationID[%s]: %s", integrationID, err)
 	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     integration.OrgID,
+		ObjID:     integration.ID,
+		ObjDomain: domain.Integration,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "integration.disconnected",
+		Data:      map[string]string{"provider": integration.ProviderID, "name": integration.Name},
+		Message:   "integration disconnected",
+	})
 
 	return disconnectedResponse{Disconnected: true}
 }
@@ -151,6 +181,17 @@ func (a *app) test(ctx context.Context, r *http.Request) web.Encoder {
 		}
 		return errs.Errorf(errs.Internal, "test: integrationID[%s]: %s", integrationID, err)
 	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     integration.OrgID,
+		ObjID:     integration.ID,
+		ObjDomain: domain.Integration,
+		ObjName:   name.Name{},
+		ActorID:   mid.GetSubjectID(ctx),
+		Action:    "integration.tested",
+		Data:      map[string]string{"provider": integration.ProviderID},
+		Message:   "integration test sent",
+	})
 
 	return testResponse{
 		OK:      true,
@@ -201,6 +242,8 @@ func (a *app) createRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
+	actorID := mid.GetSubjectID(ctx)
+
 	rule, err := a.integrationBus.CreateRule(ctx, busNew)
 	if err != nil {
 		switch {
@@ -214,6 +257,17 @@ func (a *app) createRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "createrule: %s", err)
 	}
 
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     rule.ID,
+		ObjDomain: domain.Rule,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "rule.created",
+		Data:      busNew,
+		Message:   "alert rule created",
+	})
+
 	return ruleResponse{Rule: toAppAlertRule(rule)}
 }
 
@@ -222,6 +276,11 @@ func (a *app) updateRule(ctx context.Context, r *http.Request) web.Encoder {
 	var req UpdateRuleRequest
 	if err := web.Decode(r, &req); err != nil {
 		return errs.New(errs.InvalidArgument, err)
+	}
+
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
 	ruleID, err := uuid.Parse(web.Param(r, "rule_id"))
@@ -242,6 +301,8 @@ func (a *app) updateRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
+	actorID := mid.GetSubjectID(ctx)
+
 	updated, err := a.integrationBus.UpdateRule(ctx, rule, busUpdate)
 	if err != nil {
 		if errors.Is(err, integrationbus.ErrInvalidLevel) {
@@ -249,6 +310,17 @@ func (a *app) updateRule(ctx context.Context, r *http.Request) web.Encoder {
 		}
 		return errs.Errorf(errs.Internal, "updaterule: ruleID[%s]: %s", ruleID, err)
 	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     ruleID,
+		ObjDomain: domain.Rule,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "rule.updated",
+		Data:      busUpdate,
+		Message:   "alert rule updated",
+	})
 
 	return ruleResponse{Rule: toAppAlertRule(updated)}
 }
@@ -258,6 +330,11 @@ func (a *app) toggleRule(ctx context.Context, r *http.Request) web.Encoder {
 	var req ToggleRuleRequest
 	if err := web.Decode(r, &req); err != nil {
 		return errs.New(errs.InvalidArgument, err)
+	}
+
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
 	ruleID, err := uuid.Parse(web.Param(r, "rule_id"))
@@ -273,6 +350,8 @@ func (a *app) toggleRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "queryrulebyid: ruleID[%s]: %s", ruleID, err)
 	}
 
+	actorID := mid.GetSubjectID(ctx)
+
 	updated, err := a.integrationBus.UpdateRule(ctx, rule, integrationbus.UpdateAlertRule{
 		IsActive: &req.IsActive,
 	})
@@ -280,11 +359,27 @@ func (a *app) toggleRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "togglerule: ruleID[%s]: %s", ruleID, err)
 	}
 
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     ruleID,
+		ObjDomain: domain.Rule,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "rule.toggled",
+		Data:      map[string]bool{"is_active": req.IsActive},
+		Message:   "alert rule toggled",
+	})
+
 	return toggleRuleResponse{ID: updated.ID.String(), IsActive: updated.IsActive}
 }
 
 // deleteRule handles DELETE /v1/orgs/{org_id}/rules/{rule_id}.
 func (a *app) deleteRule(ctx context.Context, r *http.Request) web.Encoder {
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
 	ruleID, err := uuid.Parse(web.Param(r, "rule_id"))
 	if err != nil {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
@@ -297,9 +392,22 @@ func (a *app) deleteRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "queryrulebyid: ruleID[%s]: %s", ruleID, err)
 	}
 
+	actorID := mid.GetSubjectID(ctx)
+
 	if err := a.integrationBus.DeleteRule(ctx, ruleID); err != nil {
 		return errs.Errorf(errs.Internal, "deleterule: ruleID[%s]: %s", ruleID, err)
 	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     ruleID,
+		ObjDomain: domain.Rule,
+		ObjName:   name.Name{},
+		ActorID:   actorID,
+		Action:    "rule.deleted",
+		Data:      nil,
+		Message:   "alert rule deleted",
+	})
 
 	return deleteRuleResponse{Deleted: true}
 }

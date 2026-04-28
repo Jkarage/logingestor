@@ -65,6 +65,7 @@ func (b *Business) Create(ctx context.Context, na NewAudit) (Audit, error) {
 
 	audit := Audit{
 		ID:        uuid.New(),
+		OrgID:     na.OrgID,
 		ObjID:     na.ObjID,
 		ObjDomain: na.ObjDomain,
 		ObjName:   na.ObjName,

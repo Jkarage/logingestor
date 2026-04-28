@@ -15,6 +15,7 @@ type queryParams struct {
 	Page      string
 	Rows      string
 	OrderBy   string
+	OrgID     string
 	ObjID     string
 	ObjDomain string
 	ObjName   string
@@ -31,6 +32,7 @@ func parseQueryParams(r *http.Request) (queryParams, error) {
 		Page:      values.Get("page"),
 		Rows:      values.Get("rows"),
 		OrderBy:   values.Get("orderBy"),
+		OrgID:     values.Get("org_id"),
 		ObjID:     values.Get("obj_id"),
 		ObjDomain: values.Get("obj_domain"),
 		ObjName:   values.Get("obj_name"),
@@ -47,6 +49,16 @@ func parseFilter(qp queryParams) (auditbus.QueryFilter, error) {
 	var fieldErrors errs.FieldErrors
 	var filter auditbus.QueryFilter
 
+	if qp.OrgID != "" {
+		id, err := uuid.Parse(qp.OrgID)
+		switch err {
+		case nil:
+			filter.OrgID = &id
+		default:
+			fieldErrors.Add("org_id", err)
+		}
+	}
+
 	if qp.ObjID != "" {
 		id, err := uuid.Parse(qp.ObjID)
 		switch err {
@@ -58,20 +70,20 @@ func parseFilter(qp queryParams) (auditbus.QueryFilter, error) {
 	}
 
 	if qp.ObjDomain != "" {
-		domain, err := domain.Parse(qp.ObjDomain)
+		d, err := domain.Parse(qp.ObjDomain)
 		switch err {
 		case nil:
-			filter.ObjDomain = &domain
+			filter.ObjDomain = &d
 		default:
 			fieldErrors.Add("obj_domain", err)
 		}
 	}
 
 	if qp.ObjName != "" {
-		name, err := name.Parse(qp.ObjName)
+		n, err := name.Parse(qp.ObjName)
 		switch err {
 		case nil:
-			filter.ObjName = &name
+			filter.ObjName = &n
 		default:
 			fieldErrors.Add("obj_name", err)
 		}
