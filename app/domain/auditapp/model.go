@@ -28,6 +28,19 @@ func (app Audit) Encode() ([]byte, string, error) {
 	return data, "application/json", err
 }
 
+// AuditResult is the response envelope for audit log queries.
+type AuditResult struct {
+	Entries    []Audit `json:"entries"`
+	Total      int     `json:"total"`
+	NextCursor string  `json:"nextCursor"`
+}
+
+// Encode implements the encoder interface.
+func (r AuditResult) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(r)
+	return data, "application/json", err
+}
+
 func toAppAudit(bus auditbus.Audit) Audit {
 	meta := bus.Data
 	if len(meta) == 0 {

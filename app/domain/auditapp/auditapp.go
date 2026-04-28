@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
-	"github.com/jkarage/logingestor/app/sdk/query"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
@@ -57,7 +56,10 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
-	return query.NewResult(toAppAudits(adts), total, pg)
+	return AuditResult{
+		Entries: toAppAudits(adts),
+		Total:   total,
+	}
 }
 
 // queryByOrg returns audit records scoped to a specific org (org_admin + super_admin).
@@ -100,5 +102,8 @@ func (a *app) queryByOrg(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
-	return query.NewResult(toAppAudits(adts), total, pg)
+	return AuditResult{
+		Entries: toAppAudits(adts),
+		Total:   total,
+	}
 }
