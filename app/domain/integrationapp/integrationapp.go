@@ -115,10 +115,28 @@ func (a *app) update(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "querybyid: integrationID[%s]: %s", integrationID, err)
 	}
 
-	updated, err := a.integrationBus.Update(ctx, mid.GetSubjectID(ctx), integration, toBusUpdateIntegration(req))
+	busUpdate := toBusUpdateIntegration(req)
+
+	updated, err := a.integrationBus.Update(ctx, mid.GetSubjectID(ctx), integration, busUpdate)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "update: integrationID[%s]: %s", integrationID, err)
 	}
+
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
+		OrgID:     orgID,
+		ObjID:     updated.ID,
+		ObjDomain: domain.Integration,
+		ObjName:   "",
+		ActorID:   mid.GetSubjectID(ctx),
+		Action:    "integration.updated",
+		Data:      map[string]string{"provider": updated.ProviderID, "name": updated.Name},
+		Message:   "integration updated",
+	})
 
 	return toAppIntegration(updated)
 }

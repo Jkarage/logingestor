@@ -63,9 +63,60 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, project pro
 		return projectbus.Project{}, err
 	}
 
-	meta := map[string]any{"name": project.Name}
-	if up.Name != nil {
-		meta["old_name"] = old.Name
+	nameChanged := up.Name != nil
+	colorChanged := up.Color != nil
+	retentionChanged := up.RetentionDays != nil
+
+	changed := 0
+	if nameChanged {
+		changed++
+	}
+	if colorChanged {
+		changed++
+	}
+	if retentionChanged {
+		changed++
+	}
+
+	action := "project.updated"
+	message := "project updated"
+	meta := map[string]any{}
+
+	if changed == 1 {
+		switch {
+		case nameChanged:
+			action = "project.renamed"
+			message = "project renamed"
+			meta["name"] = project.Name
+			meta["old_name"] = old.Name
+		case colorChanged:
+			action = "project.color_updated"
+			message = "project color updated"
+			meta["color"] = project.Color
+			meta["old_color"] = old.Color
+		case retentionChanged:
+			action = "project.retention_updated"
+			message = "project retention updated"
+			meta["retention_days"] = project.RetentionDays
+			if old.RetentionDays != nil {
+				meta["old_retention_days"] = old.RetentionDays
+			}
+		}
+	} else {
+		if nameChanged {
+			meta["name"] = project.Name
+			meta["old_name"] = old.Name
+		}
+		if colorChanged {
+			meta["color"] = project.Color
+			meta["old_color"] = old.Color
+		}
+		if retentionChanged {
+			meta["retention_days"] = project.RetentionDays
+			if old.RetentionDays != nil {
+				meta["old_retention_days"] = old.RetentionDays
+			}
+		}
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
@@ -74,9 +125,9 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, project pro
 		ObjDomain: domain.Project,
 		ObjName:   project.Name,
 		ActorID:   actorID,
-		Action:    "project.renamed",
+		Action:    action,
 		Data:      meta,
-		Message:   "project updated",
+		Message:   message,
 	}); err != nil {
 		return projectbus.Project{}, err
 	}

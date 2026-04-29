@@ -61,9 +61,23 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu orgbus.N
 }
 
 func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, org orgbus.Org, uu orgbus.UpdateOrg) (orgbus.Org, error) {
+	old := org
 	org, err := ext.bus.Update(ctx, actorID, org, uu)
 	if err != nil {
 		return orgbus.Org{}, err
+	}
+
+	// Only a name change → org.renamed; any other field touched → org.updated.
+	onlyName := uu.Name != nil && uu.Slug == nil && uu.Enabled == nil
+
+	action := "org.updated"
+	message := "org updated"
+	var data any = uu
+
+	if onlyName {
+		action = "org.renamed"
+		message = "org renamed"
+		data = map[string]any{"name": org.Name.String(), "old_name": old.Name.String()}
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
@@ -72,9 +86,9 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, org orgbus.
 		ObjDomain: domain.Org,
 		ObjName:   org.Name.String(),
 		ActorID:   actorID,
-		Action:    "org.renamed",
-		Data:      uu,
-		Message:   "org updated",
+		Action:    action,
+		Data:      data,
+		Message:   message,
 	}); err != nil {
 		return orgbus.Org{}, err
 	}
