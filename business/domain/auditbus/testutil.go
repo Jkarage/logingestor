@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 )
 
 // TestNewAudits is a helper method for testing.
@@ -21,7 +20,7 @@ func TestNewAudits(n int, actorID uuid.UUID, objDomain domain.Domain, action str
 		na := NewAudit{
 			ObjID:     uuid.New(),
 			ObjDomain: objDomain,
-			ObjName:   name.MustParse(fmt.Sprintf("ObjName%d", idx)),
+			ObjName:   fmt.Sprintf("ObjName%d", idx),
 			ActorID:   actorID,
 			Action:    action,
 			Data:      struct{ Name string }{Name: fmt.Sprintf("Name%d", idx)},

@@ -47,7 +47,7 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu userbus.
 	na := auditbus.NewAudit{
 		ObjID:     usr.ID,
 		ObjDomain: domain.User,
-		ObjName:   usr.Name,
+		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
 		Action:    "created",
 		Data:      nu,
@@ -71,7 +71,7 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, usr userbus
 	na := auditbus.NewAudit{
 		ObjID:     usr.ID,
 		ObjDomain: domain.User,
-		ObjName:   usr.Name,
+		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
 		Action:    "updated",
 		Data:      uu,
@@ -94,7 +94,7 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, usr userbus
 	na := auditbus.NewAudit{
 		ObjID:     usr.ID,
 		ObjDomain: domain.User,
-		ObjName:   usr.Name,
+		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
 		Action:    "deleted",
 		Data:      nil,

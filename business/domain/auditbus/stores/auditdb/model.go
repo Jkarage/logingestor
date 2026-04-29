@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 	"github.com/jmoiron/sqlx/types"
 )
 
@@ -32,7 +31,7 @@ func toDBAudit(bus auditbus.Audit) (audit, error) {
 		OrgID:     bus.OrgID,
 		ObjID:     bus.ObjID,
 		ObjDomain: bus.ObjDomain.String(),
-		ObjName:   bus.ObjName.String(),
+		ObjName:   bus.ObjName,
 		ActorID:   bus.ActorID,
 		Action:    bus.Action,
 		Data:      types.NullJSONText{JSONText: []byte(bus.Data), Valid: true},
@@ -49,22 +48,12 @@ func toBusAudit(db audit) (auditbus.Audit, error) {
 		return auditbus.Audit{}, fmt.Errorf("parse domain: %w", err)
 	}
 
-	// ObjName is a snapshot; tolerate empty or non-conforming values.
-	var n name.Name
-	if db.ObjName != "" {
-		n, err = name.Parse(db.ObjName)
-		if err != nil {
-			// Stored snapshot may not match current validation; use zero value.
-			n = name.Name{}
-		}
-	}
-
 	bus := auditbus.Audit{
 		ID:        db.ID,
 		OrgID:     db.OrgID,
 		ObjID:     db.ObjID,
 		ObjDomain: d,
-		ObjName:   n,
+		ObjName:   db.ObjName,
 		ActorID:   db.ActorID,
 		ActorName: db.ActorName,
 		Action:    db.Action,

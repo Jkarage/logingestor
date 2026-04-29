@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 )
 
 // Audit represents information about an individual audit record.
@@ -15,7 +14,7 @@ type Audit struct {
 	OrgID     uuid.UUID
 	ObjID     uuid.UUID
 	ObjDomain domain.Domain
-	ObjName   name.Name
+	ObjName   string
 	ActorID   uuid.UUID
 	ActorName string
 	Action    string
@@ -29,7 +28,7 @@ type NewAudit struct {
 	OrgID     uuid.UUID
 	ObjID     uuid.UUID
 	ObjDomain domain.Domain
-	ObjName   name.Name
+	ObjName   string
 	ActorID   uuid.UUID
 	Action    string
 	Data      any

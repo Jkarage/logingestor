@@ -52,7 +52,7 @@ func toAppAudit(bus auditbus.Audit) Audit {
 		OrgID:     bus.OrgID.String(),
 		ObjID:     bus.ObjID.String(),
 		ObjDomain: bus.ObjDomain.String(),
-		ObjName:   bus.ObjName.String(),
+		ObjName:   bus.ObjName,
 		ActorID:   bus.ActorID.String(),
 		ActorName: bus.ActorName,
 		Action:    bus.Action,

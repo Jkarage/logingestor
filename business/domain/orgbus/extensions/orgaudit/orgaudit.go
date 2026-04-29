@@ -11,7 +11,6 @@ import (
 	"github.com/jkarage/logingestor/business/sdk/page"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 	"github.com/jkarage/logingestor/business/types/role"
 )
 
@@ -49,7 +48,7 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu orgbus.N
 		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "org.created",
 		Data:      nu,
@@ -71,7 +70,7 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, org orgbus.
 		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "org.renamed",
 		Data:      uu,
@@ -92,10 +91,10 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, org orgbus.
 		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "org.deleted",
-		Data:      nil,
+		Data:      map[string]any{"name": org.Name.String(), "slug": org.Slug},
 		Message:   "org deleted",
 	}); err != nil {
 		return err
@@ -147,7 +146,7 @@ func (ext *Extension) Suspend(ctx context.Context, orgID uuid.UUID) error {
 		OrgID:     org.ID,
 		ObjID:     org.ID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   orgID,
 		Action:    "org.suspended",
 		Data:      nil,
@@ -177,7 +176,7 @@ func (ext *Extension) AddMember(ctx context.Context, actorID uuid.UUID, nm orgbu
 		OrgID:     nm.OrgID,
 		ObjID:     member.MemberID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "user.joined",
 		Data:      nm,
@@ -197,7 +196,7 @@ func (ext *Extension) RemoveMember(ctx context.Context, actorID uuid.UUID, membe
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
 		ObjID:     memberID,
 		ObjDomain: domain.Org,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "user.removed",
 		Data:      nil,
@@ -224,7 +223,7 @@ func (ext *Extension) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, m
 		OrgID:     member.OrgID,
 		ObjID:     memberID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "user.role_changed",
 		Data:      map[string]string{"role": r.String()},
@@ -264,7 +263,7 @@ func (ext *Extension) CreateSubscription(ctx context.Context, actorID uuid.UUID,
 		OrgID:     ns.OrgID,
 		ObjID:     sub.SubscriptionID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "subscription_created",
 		Data:      ns,
@@ -291,7 +290,7 @@ func (ext *Extension) UpdateSubscription(ctx context.Context, actorID uuid.UUID,
 		OrgID:     sub.OrgID,
 		ObjID:     sub.SubscriptionID,
 		ObjDomain: domain.Org,
-		ObjName:   org.Name,
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "subscription_updated",
 		Data:      us,

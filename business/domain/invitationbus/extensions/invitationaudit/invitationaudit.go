@@ -10,7 +10,6 @@ import (
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 )
 
 // Extension provides a wrapper for audit functionality around the invitationbus.
@@ -40,7 +39,7 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, ni invitati
 		OrgID:     ni.OrgID,
 		ObjID:     inv.ID,
 		ObjDomain: domain.Invitation,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "user.invited",
 		Data:      ni,
@@ -66,7 +65,7 @@ func (ext *Extension) Revoke(ctx context.Context, actorID uuid.UUID, invID uuid.
 		OrgID:     inv.OrgID,
 		ObjID:     invID,
 		ObjDomain: domain.Invitation,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "user.invite_cancelled",
 		Data:      nil,

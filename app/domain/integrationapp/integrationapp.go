@@ -14,7 +14,6 @@ import (
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
@@ -86,7 +85,7 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     orgID,
 		ObjID:     integration.ID,
 		ObjDomain: domain.Integration,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "integration.connected",
 		Data:      map[string]string{"provider": integration.ProviderID, "name": integration.Name},
@@ -150,7 +149,7 @@ func (a *app) delete(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     integration.OrgID,
 		ObjID:     integration.ID,
 		ObjDomain: domain.Integration,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "integration.disconnected",
 		Data:      map[string]string{"provider": integration.ProviderID, "name": integration.Name},
@@ -186,7 +185,7 @@ func (a *app) test(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     integration.OrgID,
 		ObjID:     integration.ID,
 		ObjDomain: domain.Integration,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   mid.GetSubjectID(ctx),
 		Action:    "integration.tested",
 		Data:      map[string]string{"provider": integration.ProviderID},
@@ -261,7 +260,7 @@ func (a *app) createRule(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     orgID,
 		ObjID:     rule.ID,
 		ObjDomain: domain.Rule,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "rule.created",
 		Data:      busNew,
@@ -315,7 +314,7 @@ func (a *app) updateRule(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     orgID,
 		ObjID:     ruleID,
 		ObjDomain: domain.Rule,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "rule.updated",
 		Data:      busUpdate,
@@ -363,7 +362,7 @@ func (a *app) toggleRule(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     orgID,
 		ObjID:     ruleID,
 		ObjDomain: domain.Rule,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "rule.toggled",
 		Data:      map[string]bool{"is_active": req.IsActive},
@@ -402,7 +401,7 @@ func (a *app) deleteRule(ctx context.Context, r *http.Request) web.Encoder {
 		OrgID:     orgID,
 		ObjID:     ruleID,
 		ObjDomain: domain.Rule,
-		ObjName:   name.Name{},
+		ObjName:   "",
 		ActorID:   actorID,
 		Action:    "rule.deleted",
 		Data:      nil,

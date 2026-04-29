@@ -11,7 +11,6 @@ import (
 	"github.com/jkarage/logingestor/business/sdk/page"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/types/domain"
-	"github.com/jkarage/logingestor/business/types/name"
 )
 
 // Extension provides a wrapper for audit functionality around the projectbus.
@@ -45,10 +44,10 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, np projectb
 		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
-		ObjName:   name.Name{},
+		ObjName:   project.Name,
 		ActorID:   actorID,
 		Action:    "project.created",
-		Data:      np,
+		Data:      map[string]any{"name": project.Name, "color": project.Color},
 		Message:   "project created",
 	}); err != nil {
 		return projectbus.Project{}, err
@@ -58,19 +57,25 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, np projectb
 }
 
 func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, project projectbus.Project, up projectbus.UpdateProject) (projectbus.Project, error) {
+	old := project
 	project, err := ext.bus.Update(ctx, actorID, project, up)
 	if err != nil {
 		return projectbus.Project{}, err
+	}
+
+	meta := map[string]any{"name": project.Name}
+	if up.Name != nil {
+		meta["old_name"] = old.Name
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
 		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
-		ObjName:   name.Name{},
+		ObjName:   project.Name,
 		ActorID:   actorID,
 		Action:    "project.renamed",
-		Data:      up,
+		Data:      meta,
 		Message:   "project updated",
 	}); err != nil {
 		return projectbus.Project{}, err
@@ -88,10 +93,10 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, project pro
 		OrgID:     project.OrgID,
 		ObjID:     project.ID,
 		ObjDomain: domain.Project,
-		ObjName:   name.Name{},
+		ObjName:   project.Name,
 		ActorID:   actorID,
 		Action:    "project.deleted",
-		Data:      nil,
+		Data:      map[string]any{"name": project.Name, "color": project.Color},
 		Message:   "project deleted",
 	}); err != nil {
 		return err
