@@ -249,3 +249,7 @@ CREATE INDEX IF NOT EXISTS alert_rules_connection_idx ON alert_rules(connection_
 ALTER TABLE audit
 ADD COLUMN IF NOT EXISTS org_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
 CREATE INDEX IF NOT EXISTS idx_audit_org_ts ON audit (org_id, timestamp DESC);
+-- Version: 1.18
+-- Description: Add retention_days to projects table
+ALTER TABLE projects
+ADD COLUMN IF NOT EXISTS retention_days INT NULL;

@@ -125,6 +125,9 @@ func (b *Business) Update(ctx context.Context, actorID uuid.UUID, project Projec
 	if up.Color != nil {
 		project.Color = *up.Color
 	}
+	if up.RetentionDays != nil {
+		project.RetentionDays = *up.RetentionDays
+	}
 	project.DateUpdated = time.Now()
 
 	if err := b.storer.Update(ctx, project); err != nil {

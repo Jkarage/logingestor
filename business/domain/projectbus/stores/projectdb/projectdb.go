@@ -48,9 +48,9 @@ func (s *Store) NewWithTx(tx sqldb.CommitRollbacker) (projectbus.Storer, error) 
 func (s *Store) Create(ctx context.Context, project projectbus.Project) error {
 	const q = `
 	INSERT INTO projects
-		(id, org_id, name, color, date_created, date_updated)
+		(id, org_id, name, color, retention_days, date_created, date_updated)
 	VALUES
-		(:id, :org_id, :name, :color, :date_created, :date_updated)`
+		(:id, :org_id, :name, :color, :retention_days, :date_created, :date_updated)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBProject(project)); err != nil {
 		if errors.Is(err, sqldb.ErrDBDuplicatedEntry) {
@@ -67,9 +67,10 @@ func (s *Store) Update(ctx context.Context, project projectbus.Project) error {
 	const q = `
 	UPDATE projects
 	SET
-		name         = :name,
-		color        = :color,
-		date_updated = :date_updated
+		name           = :name,
+		color          = :color,
+		retention_days = :retention_days,
+		date_updated   = :date_updated
 	WHERE
 		id = :id`
 
@@ -102,7 +103,7 @@ func (s *Store) Query(ctx context.Context, filter projectbus.QueryFilter, orderB
 
 	const q = `
 	SELECT
-		id, org_id, name, color, date_created, date_updated
+		id, org_id, name, color, retention_days, date_created, date_updated
 	FROM
 		projects`
 
@@ -156,7 +157,7 @@ func (s *Store) QueryByID(ctx context.Context, projectID uuid.UUID) (projectbus.
 
 	const q = `
 	SELECT
-		id, org_id, name, color, date_created, date_updated
+		id, org_id, name, color, retention_days, date_created, date_updated
 	FROM
 		projects
 	WHERE
@@ -182,7 +183,7 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]projectbus.P
 	}
 
 	const q = `
-	SELECT id, org_id, name, color, date_created, date_updated
+	SELECT id, org_id, name, color, retention_days, date_created, date_updated
 	FROM projects
 	WHERE org_id = :org_id
 	ORDER BY date_created ASC`
@@ -271,7 +272,7 @@ func (s *Store) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uui
 	}
 
 	const q = `
-	SELECT p.id, p.org_id, p.name, p.color, p.date_created, p.date_updated
+	SELECT p.id, p.org_id, p.name, p.color, p.retention_days, p.date_created, p.date_updated
 	FROM projects p
 	WHERE p.org_id = :org_id
 	AND (

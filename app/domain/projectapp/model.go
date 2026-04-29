@@ -12,12 +12,13 @@ import (
 
 // Project represents a project returned by the API.
 type Project struct {
-	ID          string `json:"id"`
-	OrgID       string `json:"orgId"`
-	Name        string `json:"name"`
-	Color       string `json:"color"`
-	DateCreated string `json:"dateCreated"`
-	DateUpdated string `json:"dateUpdated"`
+	ID            string `json:"id"`
+	OrgID         string `json:"orgId"`
+	Name          string `json:"name"`
+	Color         string `json:"color"`
+	RetentionDays *int   `json:"retentionDays"`
+	DateCreated   string `json:"dateCreated"`
+	DateUpdated   string `json:"dateUpdated"`
 }
 
 // Encode implements the encoder interface.
@@ -37,12 +38,13 @@ func (app Projects) Encode() ([]byte, string, error) {
 
 func toAppProject(bus projectbus.Project) Project {
 	return Project{
-		ID:          bus.ID.String(),
-		OrgID:       bus.OrgID.String(),
-		Name:        bus.Name,
-		Color:       bus.Color,
-		DateCreated: bus.DateCreated.Format(time.RFC3339),
-		DateUpdated: bus.DateUpdated.Format(time.RFC3339),
+		ID:            bus.ID.String(),
+		OrgID:         bus.OrgID.String(),
+		Name:          bus.Name,
+		Color:         bus.Color,
+		RetentionDays: bus.RetentionDays,
+		DateCreated:   bus.DateCreated.Format(time.RFC3339),
+		DateUpdated:   bus.DateUpdated.Format(time.RFC3339),
 	}
 }
 
@@ -96,8 +98,9 @@ func toBusNewProject(app NewProject) (projectbus.NewProject, error) {
 
 // UpdateProject defines the data needed to update a project.
 type UpdateProject struct {
-	Name  *string `json:"name"`
-	Color *string `json:"color"`
+	Name          *string         `json:"name"`
+	Color         *string         `json:"color"`
+	RetentionDays json.RawMessage `json:"retentionDays"`
 }
 
 // Decode implements the decoder interface.
@@ -122,12 +125,31 @@ func toBusUpdateProject(app UpdateProject) (projectbus.UpdateProject, error) {
 		}
 	}
 
+	// Parse retentionDays using RawMessage so we can distinguish three states:
+	// absent (nil raw) → don't touch the field; "null" → clear to NULL; integer → set value.
+	var retentionDays **int
+	if len(app.RetentionDays) > 0 {
+		if string(app.RetentionDays) == "null" {
+			retentionDays = new(*int) // non-nil outer, nil inner → clear to NULL
+		} else {
+			var v int
+			if err := json.Unmarshal(app.RetentionDays, &v); err != nil || v < 0 {
+				fieldErrors.Add("retentionDays", fmt.Errorf("retentionDays must be a positive integer or null"))
+			} else {
+				inner := v
+				outer := &inner
+				retentionDays = &outer
+			}
+		}
+	}
+
 	if len(fieldErrors) > 0 {
 		return projectbus.UpdateProject{}, fmt.Errorf("validate: %w", fieldErrors.ToError())
 	}
 
 	return projectbus.UpdateProject{
-		Name:  app.Name,
-		Color: app.Color,
+		Name:          app.Name,
+		Color:         app.Color,
+		RetentionDays: retentionDays,
 	}, nil
 }
