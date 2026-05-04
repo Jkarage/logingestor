@@ -418,6 +418,49 @@ func (s *Store) QueryMemberByID(ctx context.Context, memberID uuid.UUID) (orgbus
 	return toBusOrgMember(dbMember)
 }
 
+// QueryMemberWithUserByID returns a single membership row joined with the user profile.
+func (s *Store) QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (orgbus.OrgMemberUser, error) {
+	data := struct {
+		MemberID string `db:"member_id"`
+	}{
+		MemberID: memberID.String(),
+	}
+
+	const q = `
+	SELECT
+		m.member_id,
+		m.user_id,
+		m.org_id,
+		u.name  AS user_name,
+		u.email,
+		m.role,
+		u.enabled,
+		m.joined_at,
+		(
+			SELECT COUNT(*)
+			FROM user_project_access upa
+			JOIN projects p ON p.id = upa.project_id
+			WHERE upa.user_id = m.user_id
+			  AND p.org_id = m.org_id
+		) AS project_count
+	FROM
+		org_members m
+	JOIN
+		users u ON u.id = m.user_id
+	WHERE
+		m.member_id = :member_id`
+
+	var dbMember orgMemberUserDB
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &dbMember); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return orgbus.OrgMemberUser{}, fmt.Errorf("db: %w", orgbus.ErrMemberNotFound)
+		}
+		return orgbus.OrgMemberUser{}, fmt.Errorf("db: %w", err)
+	}
+
+	return toBusOrgMemberUser(dbMember)
+}
+
 // =============================================================================
 // Subscriptions
 

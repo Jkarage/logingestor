@@ -47,6 +47,7 @@ type Storer interface {
 	QueryMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error)
 	QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID) ([]OrgMemberUser, error)
 	QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error)
+	QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (OrgMemberUser, error)
 
 	// Subscriptions
 	CreateSubscription(ctx context.Context, sub Subscription) error
@@ -78,6 +79,7 @@ type ExtBusiness interface {
 	QueryMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error)
 	QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID) ([]OrgMemberUser, error)
 	QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error)
+	QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (OrgMemberUser, error)
 
 	// Subscriptions
 	CreateSubscription(ctx context.Context, actorID uuid.UUID, ns NewSubscription) (Subscription, error)
@@ -297,6 +299,15 @@ func (b *Business) QueryMemberByID(ctx context.Context, memberID uuid.UUID) (Org
 	member, err := b.storer.QueryMemberByID(ctx, memberID)
 	if err != nil {
 		return OrgMember{}, fmt.Errorf("querymemberbyid: %w", err)
+	}
+	return member, nil
+}
+
+// QueryMemberWithUserByID returns a single org member joined with their user profile.
+func (b *Business) QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (OrgMemberUser, error) {
+	member, err := b.storer.QueryMemberWithUserByID(ctx, memberID)
+	if err != nil {
+		return OrgMemberUser{}, fmt.Errorf("querymemberwithUserbyid: %w", err)
 	}
 	return member, nil
 }
