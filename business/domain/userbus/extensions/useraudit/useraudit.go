@@ -49,8 +49,8 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu userbus.
 		ObjDomain: domain.User,
 		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
-		Action:    "created",
-		Data:      nu,
+		Action:    "user.created",
+		Data:      map[string]any{"name": usr.Name.String(), "email": usr.Email.Address},
 		Message:   "user created",
 	}
 
@@ -63,9 +63,24 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, nu userbus.
 
 // Update applies auditing to the user update process.
 func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, usr userbus.User, uu userbus.UpdateUser) (userbus.User, error) {
+	before := usr
 	usr, err := ext.bus.Update(ctx, actorID, usr, uu)
 	if err != nil {
 		return userbus.User{}, err
+	}
+
+	meta := map[string]any{}
+	if uu.Name != nil {
+		meta["old_name"] = before.Name.String()
+		meta["name"] = usr.Name.String()
+	}
+	if uu.Email != nil {
+		meta["old_email"] = before.Email.Address
+		meta["email"] = usr.Email.Address
+	}
+	if uu.Enabled != nil {
+		meta["old_enabled"] = before.Enabled
+		meta["enabled"] = usr.Enabled
 	}
 
 	na := auditbus.NewAudit{
@@ -73,8 +88,8 @@ func (ext *Extension) Update(ctx context.Context, actorID uuid.UUID, usr userbus
 		ObjDomain: domain.User,
 		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
-		Action:    "updated",
-		Data:      uu,
+		Action:    "user.updated",
+		Data:      meta,
 		Message:   "user updated",
 	}
 
@@ -96,8 +111,8 @@ func (ext *Extension) Delete(ctx context.Context, actorID uuid.UUID, usr userbus
 		ObjDomain: domain.User,
 		ObjName:   usr.Name.String(),
 		ActorID:   actorID,
-		Action:    "deleted",
-		Data:      nil,
+		Action:    "user.deleted",
+		Data:      map[string]any{"name": usr.Name.String(), "email": usr.Email.Address},
 		Message:   "user deleted",
 	}
 

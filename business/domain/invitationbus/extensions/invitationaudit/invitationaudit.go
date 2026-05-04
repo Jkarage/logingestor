@@ -39,10 +39,10 @@ func (ext *Extension) Create(ctx context.Context, actorID uuid.UUID, ni invitati
 		OrgID:     ni.OrgID,
 		ObjID:     inv.ID,
 		ObjDomain: domain.Invitation,
-		ObjName:   "",
+		ObjName:   ni.Email,
 		ActorID:   actorID,
 		Action:    "user.invited",
-		Data:      ni,
+		Data:      map[string]string{"email": ni.Email, "role": ni.Role.String()},
 		Message:   "invitation sent to " + ni.Email,
 	}); err != nil {
 		return invitationbus.Invitation{}, err
@@ -65,11 +65,11 @@ func (ext *Extension) Revoke(ctx context.Context, actorID uuid.UUID, invID uuid.
 		OrgID:     inv.OrgID,
 		ObjID:     invID,
 		ObjDomain: domain.Invitation,
-		ObjName:   "",
+		ObjName:   inv.Email,
 		ActorID:   actorID,
 		Action:    "user.invite_cancelled",
-		Data:      nil,
-		Message:   "invitation revoked",
+		Data:      map[string]string{"email": inv.Email, "role": inv.Role.String()},
+		Message:   "invitation revoked for " + inv.Email,
 	}); err != nil {
 		return err
 	}

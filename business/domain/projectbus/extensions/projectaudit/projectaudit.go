@@ -181,9 +181,30 @@ func (ext *Extension) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]projec
 	return ext.bus.QueryByOrg(ctx, orgID)
 }
 
-// GrantProjectAccess does not apply auditing.
 func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error {
-	return ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID)
+	if err := ext.bus.GrantProjectAccess(ctx, actorID, userID, projectID); err != nil {
+		return err
+	}
+
+	project, err := ext.bus.QueryByID(ctx, projectID)
+	if err != nil {
+		return err
+	}
+
+	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     project.OrgID,
+		ObjID:     projectID,
+		ObjDomain: domain.Project,
+		ObjName:   project.Name,
+		ActorID:   actorID,
+		Action:    "project.access_granted",
+		Data:      map[string]string{"user_id": userID.String()},
+		Message:   "project access granted to user",
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // HasAccess does not apply auditing.

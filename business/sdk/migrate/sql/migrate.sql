@@ -229,20 +229,21 @@ CREATE INDEX IF NOT EXISTS integrations_org_idx ON integrations(org_id);
 -- Version: 1.16
 -- Description: Create alert_rules table
 CREATE TABLE IF NOT EXISTS alert_rules (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id        UUID NOT NULL,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
     connection_id UUID NOT NULL,
-    project_id    UUID,
-    name          TEXT NOT NULL,
-    level         TEXT NOT NULL,
-    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT alert_rules_org_fk        FOREIGN KEY (org_id)        REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT alert_rules_connection_fk FOREIGN KEY (connection_id) REFERENCES integrations(id)  ON DELETE CASCADE,
-    CONSTRAINT alert_rules_project_fk    FOREIGN KEY (project_id)    REFERENCES projects(id)      ON DELETE SET NULL
+    project_id UUID,
+    name TEXT NOT NULL,
+    level TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT alert_rules_org_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT alert_rules_connection_fk FOREIGN KEY (connection_id) REFERENCES integrations(id) ON DELETE CASCADE,
+    CONSTRAINT alert_rules_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE
+    SET NULL
 );
-CREATE INDEX IF NOT EXISTS alert_rules_org_idx        ON alert_rules(org_id);
+CREATE INDEX IF NOT EXISTS alert_rules_org_idx ON alert_rules(org_id);
 CREATE INDEX IF NOT EXISTS alert_rules_connection_idx ON alert_rules(connection_id);
 -- Version: 1.17
 -- Description: Add org_id to audit table for org-scoped audit log queries

@@ -234,6 +234,11 @@ func (ext *Extension) RemoveMember(ctx context.Context, actorID uuid.UUID, membe
 }
 
 func (ext *Extension) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, memberID uuid.UUID, r role.Role) (orgbus.OrgMember, error) {
+	before, err := ext.bus.QueryMemberByID(ctx, memberID)
+	if err != nil {
+		return orgbus.OrgMember{}, err
+	}
+
 	member, err := ext.bus.UpdateMemberRole(ctx, actorID, memberID, r)
 	if err != nil {
 		return orgbus.OrgMember{}, err
@@ -251,7 +256,7 @@ func (ext *Extension) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, m
 		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "user.role_changed",
-		Data:      map[string]string{"role": r.String()},
+		Data:      map[string]string{"old_role": before.Role.String(), "new_role": r.String()},
 		Message:   "member role updated",
 	}); err != nil {
 		return orgbus.OrgMember{}, err
