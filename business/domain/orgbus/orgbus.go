@@ -77,6 +77,7 @@ type ExtBusiness interface {
 	UpdateMemberRole(ctx context.Context, actorID uuid.UUID, memberID uuid.UUID, r role.Role) (OrgMember, error)
 	QueryMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMember, error)
 	QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID) ([]OrgMemberUser, error)
+	QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error)
 
 	// Subscriptions
 	CreateSubscription(ctx context.Context, actorID uuid.UUID, ns NewSubscription) (Subscription, error)
@@ -288,6 +289,15 @@ func (b *Business) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, memb
 		return OrgMember{}, fmt.Errorf("querymemberbyid: %w", err)
 	}
 
+	return member, nil
+}
+
+// QueryMemberByID returns a single org member by their membership ID.
+func (b *Business) QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error) {
+	member, err := b.storer.QueryMemberByID(ctx, memberID)
+	if err != nil {
+		return OrgMember{}, fmt.Errorf("querymemberbyid: %w", err)
+	}
 	return member, nil
 }
 

@@ -140,6 +140,13 @@ func (ext *Extension) QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID
 	return ext.bus.QueryMembersWithUsers(ctx, orgID)
 }
 
+func (ext *Extension) QueryMemberByID(ctx context.Context, memberID uuid.UUID) (orgbus.OrgMember, error) {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.querymemberbyid")
+	defer span.End()
+
+	return ext.bus.QueryMemberByID(ctx, memberID)
+}
+
 // =============================================================================
 // Subscriptions
 

@@ -203,17 +203,28 @@ func (ext *Extension) AddMember(ctx context.Context, actorID uuid.UUID, nm orgbu
 }
 
 func (ext *Extension) RemoveMember(ctx context.Context, actorID uuid.UUID, memberID uuid.UUID) error {
+	member, err := ext.bus.QueryMemberByID(ctx, memberID)
+	if err != nil {
+		return err
+	}
+
+	org, err := ext.bus.QueryByID(ctx, member.OrgID)
+	if err != nil {
+		return err
+	}
+
 	if err := ext.bus.RemoveMember(ctx, actorID, memberID); err != nil {
 		return err
 	}
 
 	if _, err := ext.auditBus.Create(ctx, auditbus.NewAudit{
+		OrgID:     member.OrgID,
 		ObjID:     memberID,
 		ObjDomain: domain.Org,
-		ObjName:   "",
+		ObjName:   org.Name.String(),
 		ActorID:   actorID,
 		Action:    "user.removed",
-		Data:      nil,
+		Data:      map[string]string{"role": member.Role.String()},
 		Message:   "member removed from org",
 	}); err != nil {
 		return err
@@ -252,6 +263,11 @@ func (ext *Extension) UpdateMemberRole(ctx context.Context, actorID uuid.UUID, m
 // QueryMembers does not apply auditing.
 func (ext *Extension) QueryMembers(ctx context.Context, orgID uuid.UUID) ([]orgbus.OrgMember, error) {
 	return ext.bus.QueryMembers(ctx, orgID)
+}
+
+// QueryMemberByID does not apply auditing.
+func (ext *Extension) QueryMemberByID(ctx context.Context, memberID uuid.UUID) (orgbus.OrgMember, error) {
+	return ext.bus.QueryMemberByID(ctx, memberID)
 }
 
 // QueryMembersWithUsers does not apply auditing.
