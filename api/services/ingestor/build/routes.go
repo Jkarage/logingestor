@@ -2,6 +2,7 @@ package build
 
 import (
 	"github.com/jkarage/logingestor/app/domain/auditapp"
+	"github.com/jkarage/logingestor/app/domain/billingapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
 	"github.com/jkarage/logingestor/app/domain/contactapp"
 	"github.com/jkarage/logingestor/app/domain/integrationapp"
@@ -98,6 +99,16 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		UserBus:        cfg.BusConfig.UserBus,
 		IntegrationBus: cfg.BusConfig.IntegrationBus,
 		AuditBus:       cfg.BusConfig.AuditBus,
+	})
+
+	billingapp.Routes(app, billingapp.Config{
+		Log:                 cfg.Log,
+		AuthClient:          cfg.IngestorConfig.AuthClient,
+		UserBus:             cfg.BusConfig.UserBus,
+		OrgBus:              cfg.BusConfig.OrgBus,
+		StripeSecretKey:     cfg.BillingConfig.StripeSecretKey,
+		StripeWebhookSecret: cfg.BillingConfig.StripeWebhookSecret,
+		AppBaseURL:          cfg.BillingConfig.AppBaseURL,
 	})
 
 }

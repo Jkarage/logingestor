@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
@@ -462,17 +463,89 @@ func (s *Store) QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID)
 }
 
 // =============================================================================
+// Plans
+
+// QueryAllPlans returns all active plans from the catalog.
+func (s *Store) QueryAllPlans(ctx context.Context) ([]orgbus.Plan, error) {
+	const q = `
+	SELECT id, slug, name, price_cents, interval, stripe_price_id, features, is_active, created_at
+	FROM plans
+	WHERE is_active = true
+	ORDER BY price_cents ASC`
+
+	var dbPlans []planDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, struct{}{}, &dbPlans); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	return toBusPlans(dbPlans)
+}
+
+// QueryPlanBySlug returns a single plan by its slug.
+func (s *Store) QueryPlanBySlug(ctx context.Context, slug string) (orgbus.Plan, error) {
+	data := struct {
+		Slug string `db:"slug"`
+	}{
+		Slug: slug,
+	}
+
+	const q = `
+	SELECT id, slug, name, price_cents, interval, stripe_price_id, features, is_active, created_at
+	FROM plans
+	WHERE slug = :slug`
+
+	var dbPlan planDB
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &dbPlan); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return orgbus.Plan{}, fmt.Errorf("db: %w", orgbus.ErrNotFound)
+		}
+		return orgbus.Plan{}, fmt.Errorf("db: %w", err)
+	}
+
+	return toBusPlan(dbPlan)
+}
+
+// =============================================================================
 // Subscriptions
 
 // CreateSubscription inserts a new subscription row.
 func (s *Store) CreateSubscription(ctx context.Context, sub orgbus.Subscription) error {
 	const q = `
 	INSERT INTO subscriptions
-		(subscription_id, org_id, plan, status, period_start, period_end, date_created, date_updated)
+		(subscription_id, org_id, plan_id, status, stripe_customer_id, stripe_subscription_id,
+		 cancel_at_period_end, cancelled_at, period_start, period_end, date_created, date_updated)
 	VALUES
-		(:subscription_id, :org_id, :plan, :status, :period_start, :period_end, :date_created, :date_updated)`
+		(:subscription_id, :org_id, :plan_id, :status, :stripe_customer_id, :stripe_subscription_id,
+		 :cancel_at_period_end, :cancelled_at, :period_start, :period_end, :date_created, :date_updated)`
 
-	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBSubscription(sub)); err != nil {
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toWriteDBSubscription(sub)); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// UpsertSubscription inserts or updates a subscription row keyed on org_id.
+func (s *Store) UpsertSubscription(ctx context.Context, sub orgbus.Subscription) error {
+	const q = `
+	INSERT INTO subscriptions
+		(subscription_id, org_id, plan_id, status, stripe_customer_id, stripe_subscription_id,
+		 cancel_at_period_end, cancelled_at, period_start, period_end, date_created, date_updated)
+	VALUES
+		(:subscription_id, :org_id, :plan_id, :status, :stripe_customer_id, :stripe_subscription_id,
+		 :cancel_at_period_end, :cancelled_at, :period_start, :period_end, :date_created, :date_updated)
+	ON CONFLICT (org_id) DO UPDATE SET
+		plan_id                = EXCLUDED.plan_id,
+		status                 = EXCLUDED.status,
+		stripe_customer_id     = EXCLUDED.stripe_customer_id,
+		stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+		cancel_at_period_end   = EXCLUDED.cancel_at_period_end,
+		cancelled_at           = EXCLUDED.cancelled_at,
+		period_start           = EXCLUDED.period_start,
+		period_end             = EXCLUDED.period_end,
+		date_updated           = EXCLUDED.date_updated`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toWriteDBSubscription(sub)); err != nil {
 		return fmt.Errorf("namedexeccontext: %w", err)
 	}
 
@@ -484,15 +557,78 @@ func (s *Store) UpdateSubscription(ctx context.Context, sub orgbus.Subscription)
 	const q = `
 	UPDATE subscriptions
 	SET
-		plan         = :plan,
-		status       = :status,
-		period_start = :period_start,
-		period_end   = :period_end,
-		date_updated = :date_updated
+		plan_id                = :plan_id,
+		status                 = :status,
+		stripe_customer_id     = :stripe_customer_id,
+		stripe_subscription_id = :stripe_subscription_id,
+		cancel_at_period_end   = :cancel_at_period_end,
+		cancelled_at           = :cancelled_at,
+		period_start           = :period_start,
+		period_end             = :period_end,
+		date_updated           = :date_updated
 	WHERE
 		subscription_id = :subscription_id`
 
-	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBSubscription(sub)); err != nil {
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toWriteDBSubscription(sub)); err != nil {
+		return fmt.Errorf("namedexeccontext: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateSubscriptionByStripeID updates a subscription row identified by its Stripe subscription ID.
+func (s *Store) UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub orgbus.Subscription) error {
+	var custID *string
+	if sub.StripeCustomerID != "" {
+		s := sub.StripeCustomerID
+		custID = &s
+	}
+	var newSubID *string
+	if sub.StripeSubscriptionID != "" {
+		s := sub.StripeSubscriptionID
+		newSubID = &s
+	}
+
+	data := struct {
+		LookupStripeSubID    string     `db:"lookup_stripe_sub_id"`
+		PlanID               uuid.UUID  `db:"plan_id"`
+		Status               string     `db:"status"`
+		StripeCustomerID     *string    `db:"stripe_customer_id"`
+		NewStripeSubID       *string    `db:"new_stripe_sub_id"`
+		CancelAtPeriodEnd    bool       `db:"cancel_at_period_end"`
+		CancelledAt          *time.Time `db:"cancelled_at"`
+		PeriodStart          *time.Time `db:"period_start"`
+		PeriodEnd            *time.Time `db:"period_end"`
+		DateUpdated          time.Time  `db:"date_updated"`
+	}{
+		LookupStripeSubID: stripeSubID,
+		PlanID:            sub.PlanID,
+		Status:            sub.Status.String(),
+		StripeCustomerID:  custID,
+		NewStripeSubID:    newSubID,
+		CancelAtPeriodEnd: sub.CancelAtPeriodEnd,
+		CancelledAt:       sub.CancelledAt,
+		PeriodStart:       sub.PeriodStart,
+		PeriodEnd:         sub.PeriodEnd,
+		DateUpdated:       sub.DateUpdated.UTC(),
+	}
+
+	const q = `
+	UPDATE subscriptions
+	SET
+		plan_id                = :plan_id,
+		status                 = :status,
+		stripe_customer_id     = COALESCE(:stripe_customer_id, stripe_customer_id),
+		stripe_subscription_id = :new_stripe_sub_id,
+		cancel_at_period_end   = :cancel_at_period_end,
+		cancelled_at           = :cancelled_at,
+		period_start           = COALESCE(:period_start, period_start),
+		period_end             = COALESCE(:period_end, period_end),
+		date_updated           = :date_updated
+	WHERE
+		stripe_subscription_id = :lookup_stripe_sub_id`
+
+	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
 		return fmt.Errorf("namedexeccontext: %w", err)
 	}
 
@@ -509,14 +645,14 @@ func (s *Store) QuerySubscription(ctx context.Context, orgID uuid.UUID) (orgbus.
 
 	const q = `
 	SELECT
-		subscription_id, org_id, plan, status, period_start, period_end, date_created, date_updated
-	FROM
-		subscriptions
-	WHERE
-		org_id = :org_id
-	ORDER BY
-		date_created DESC
-	FETCH FIRST 1 ROWS ONLY`
+		s.subscription_id, s.org_id, s.plan_id,
+		pl.slug AS plan_slug, pl.name AS plan_name, pl.features AS plan_features,
+		s.status, s.stripe_customer_id, s.stripe_subscription_id,
+		s.cancel_at_period_end, s.cancelled_at,
+		s.period_start, s.period_end, s.date_created, s.date_updated
+	FROM subscriptions s
+	JOIN plans pl ON pl.id = s.plan_id
+	WHERE s.org_id = :org_id`
 
 	var dbSub subscriptionDB
 	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &dbSub); err != nil {

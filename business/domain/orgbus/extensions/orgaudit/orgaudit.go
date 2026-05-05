@@ -346,3 +346,22 @@ func (ext *Extension) UpdateSubscription(ctx context.Context, actorID uuid.UUID,
 func (ext *Extension) QuerySubscription(ctx context.Context, orgID uuid.UUID) (orgbus.Subscription, error) {
 	return ext.bus.QuerySubscription(ctx, orgID)
 }
+
+func (ext *Extension) UpsertSubscription(ctx context.Context, sub orgbus.Subscription) error {
+	return ext.bus.UpsertSubscription(ctx, sub)
+}
+
+func (ext *Extension) UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub orgbus.Subscription) error {
+	return ext.bus.UpdateSubscriptionByStripeID(ctx, stripeSubID, sub)
+}
+
+// =============================================================================
+// Plans
+
+func (ext *Extension) QueryAllPlans(ctx context.Context) ([]orgbus.Plan, error) {
+	return ext.bus.QueryAllPlans(ctx)
+}
+
+func (ext *Extension) QueryPlanBySlug(ctx context.Context, slug string) (orgbus.Plan, error) {
+	return ext.bus.QueryPlanBySlug(ctx, slug)
+}

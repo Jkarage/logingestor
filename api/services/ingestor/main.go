@@ -143,6 +143,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			CerebriumAPIKey  string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_API_KEY,mask"`
 			CerebriumBaseURL string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_BASE_URL"`
 		}
+		Stripe struct {
+			SecretKey     string `conf:"default:sk_test_placeholder,env:STRIPE_SECRET_KEY,mask"`
+			WebhookSecret string `conf:"default:whsec_placeholder,env:STRIPE_WEBHOOK_SECRET,mask"`
+			ProPriceID    string `conf:"default:price_placeholder,env:STRIPE_PRO_PRICE_ID"`
+			AppBaseURL    string `conf:"default:https://app.streamlogia.com,env:APP_BASE_URL"`
+		}
 	}{
 		Version: conf.Version{
 			Build: tag,
@@ -338,6 +344,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 		},
 		AuthConfig: mux.AuthConfig{
 			Auth: ath,
+		},
+		BillingConfig: mux.BillingConfig{
+			StripeSecretKey:     cfg.Stripe.SecretKey,
+			StripeWebhookSecret: cfg.Stripe.WebhookSecret,
+			AppBaseURL:          cfg.Stripe.AppBaseURL,
 		},
 		EmailConfig:    em,
 		EmailBaseURL:   cfg.Resend.EmailBaseURL,

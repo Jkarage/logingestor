@@ -36,8 +36,6 @@ type UpdateOrg struct {
 // Membership
 
 // OrgMember represents a user's membership in an organization.
-// The role is scoped to this membership row — a user can be admin in org A
-// and viewer in org B.
 type OrgMember struct {
 	MemberID uuid.UUID
 	OrgID    uuid.UUID
@@ -103,9 +101,9 @@ func (s SubscriptionStatus) String() string { return s.value }
 func (s SubscriptionStatus) Equal(s2 SubscriptionStatus) bool { return s.value == s2.value }
 
 var (
-	StatusTrialing = SubscriptionStatus{"trialing"}
-	StatusActive   = SubscriptionStatus{"active"}
-	StatusPastDue  = SubscriptionStatus{"past_due"}
+	StatusTrialing  = SubscriptionStatus{"trialing"}
+	StatusActive    = SubscriptionStatus{"active"}
+	StatusPastDue   = SubscriptionStatus{"past_due"}
 	StatusCancelled = SubscriptionStatus{"cancelled"}
 )
 
@@ -125,8 +123,27 @@ func ParseSubscriptionStatus(value string) (SubscriptionStatus, error) {
 	return s, nil
 }
 
+// PlanFeatures holds the feature limits associated with a billing plan.
+type PlanFeatures struct {
+	LogRetentionDays int
+	MaxProjects      int
+	MaxMembers       int
+}
+
+// Plan represents a row in the plans catalog table.
+type Plan struct {
+	PlanID         uuid.UUID
+	Slug           SubscriptionPlan
+	Name           string
+	PriceCents     int
+	Interval       string
+	StripePriceID  string
+	Features       PlanFeatures
+	IsActive       bool
+	CreatedAt      time.Time
+}
+
 // OrgMemberUser combines membership metadata with the user's profile.
-// Used when listing all members of an org — avoids N+1 lookups.
 type OrgMemberUser struct {
 	MemberID     uuid.UUID
 	UserID       uuid.UUID
@@ -140,39 +157,45 @@ type OrgMemberUser struct {
 }
 
 // UserOrg is returned when listing the orgs a specific user belongs to.
-// It embeds the Org and carries the membership role so the frontend can
-// know what actions the user is allowed to take within that org.
 type UserOrg struct {
 	Org
 	Role role.Role
 }
 
 // Subscription represents a billing subscription attached to an organization.
-// Organizations pay — not individual users.
 type Subscription struct {
-	SubscriptionID uuid.UUID
-	OrgID          uuid.UUID
-	Plan           SubscriptionPlan
-	Status         SubscriptionStatus
-	PeriodStart    time.Time
-	PeriodEnd      time.Time
-	DateCreated    time.Time
-	DateUpdated    time.Time
+	SubscriptionID       uuid.UUID
+	OrgID                uuid.UUID
+	PlanID               uuid.UUID
+	Plan                 SubscriptionPlan
+	PlanName             string
+	PlanFeatures         PlanFeatures
+	Status               SubscriptionStatus
+	StripeCustomerID     string
+	StripeSubscriptionID string
+	CancelAtPeriodEnd    bool
+	CancelledAt          *time.Time
+	PeriodStart          *time.Time
+	PeriodEnd            *time.Time
+	DateCreated          time.Time
+	DateUpdated          time.Time
 }
 
 // NewSubscription contains the information needed to create a subscription.
 type NewSubscription struct {
-	OrgID       uuid.UUID
-	Plan        SubscriptionPlan
-	Status      SubscriptionStatus
-	PeriodStart time.Time
-	PeriodEnd   time.Time
+	OrgID  uuid.UUID
+	PlanID uuid.UUID
+	Status SubscriptionStatus
 }
 
 // UpdateSubscription contains the fields that can be changed on a subscription.
 type UpdateSubscription struct {
-	Plan        *SubscriptionPlan
-	Status      *SubscriptionStatus
-	PeriodStart *time.Time
-	PeriodEnd   *time.Time
+	PlanID               *uuid.UUID
+	Status               *SubscriptionStatus
+	StripeCustomerID     *string
+	StripeSubscriptionID *string
+	CancelAtPeriodEnd    *bool
+	CancelledAt          *time.Time
+	PeriodStart          *time.Time
+	PeriodEnd            *time.Time
 }

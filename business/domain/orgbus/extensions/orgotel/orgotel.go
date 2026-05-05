@@ -177,3 +177,34 @@ func (ext *Extension) QuerySubscription(ctx context.Context, orgID uuid.UUID) (o
 
 	return ext.bus.QuerySubscription(ctx, orgID)
 }
+
+func (ext *Extension) UpsertSubscription(ctx context.Context, sub orgbus.Subscription) error {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.upsertsubscription")
+	defer span.End()
+
+	return ext.bus.UpsertSubscription(ctx, sub)
+}
+
+func (ext *Extension) UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub orgbus.Subscription) error {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.updatesubscriptionbystripeid")
+	defer span.End()
+
+	return ext.bus.UpdateSubscriptionByStripeID(ctx, stripeSubID, sub)
+}
+
+// =============================================================================
+// Plans
+
+func (ext *Extension) QueryAllPlans(ctx context.Context) ([]orgbus.Plan, error) {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.queryallplans")
+	defer span.End()
+
+	return ext.bus.QueryAllPlans(ctx)
+}
+
+func (ext *Extension) QueryPlanBySlug(ctx context.Context, slug string) (orgbus.Plan, error) {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.queryplanbyslug")
+	defer span.End()
+
+	return ext.bus.QueryPlanBySlug(ctx, slug)
+}

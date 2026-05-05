@@ -18,10 +18,14 @@ import (
 
 // Set of error variables for CRUD operations.
 var (
-	ErrNotFound     = errors.New("org not found")
-	ErrUniqueSlug   = errors.New("slug is not unique")
-	ErrMemberExists = errors.New("user is already a member")
-	ErrMemberNotFound = errors.New("member not found")
+	ErrNotFound          = errors.New("org not found")
+	ErrUniqueSlug        = errors.New("slug is not unique")
+	ErrMemberExists      = errors.New("user is already a member")
+	ErrMemberNotFound    = errors.New("member not found")
+	ErrNoBillingAccount  = errors.New("no billing account")
+	ErrAlreadySubscribed = errors.New("already has active subscription")
+	ErrNotSubscribed     = errors.New("org is not on a paid plan")
+	ErrAlreadyCancelled  = errors.New("subscription already set to cancel")
 )
 
 // Storer interface declares the behavior this package needs to persist and
@@ -49,10 +53,16 @@ type Storer interface {
 	QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error)
 	QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (OrgMemberUser, error)
 
+	// Plans
+	QueryAllPlans(ctx context.Context) ([]Plan, error)
+	QueryPlanBySlug(ctx context.Context, slug string) (Plan, error)
+
 	// Subscriptions
 	CreateSubscription(ctx context.Context, sub Subscription) error
 	UpdateSubscription(ctx context.Context, sub Subscription) error
 	QuerySubscription(ctx context.Context, orgID uuid.UUID) (Subscription, error)
+	UpsertSubscription(ctx context.Context, sub Subscription) error
+	UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub Subscription) error
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -81,10 +91,16 @@ type ExtBusiness interface {
 	QueryMemberByID(ctx context.Context, memberID uuid.UUID) (OrgMember, error)
 	QueryMemberWithUserByID(ctx context.Context, memberID uuid.UUID) (OrgMemberUser, error)
 
+	// Plans
+	QueryAllPlans(ctx context.Context) ([]Plan, error)
+	QueryPlanBySlug(ctx context.Context, slug string) (Plan, error)
+
 	// Subscriptions
 	CreateSubscription(ctx context.Context, actorID uuid.UUID, ns NewSubscription) (Subscription, error)
 	UpdateSubscription(ctx context.Context, actorID uuid.UUID, sub Subscription, us UpdateSubscription) (Subscription, error)
 	QuerySubscription(ctx context.Context, orgID uuid.UUID) (Subscription, error)
+	UpsertSubscription(ctx context.Context, sub Subscription) error
+	UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub Subscription) error
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -158,6 +174,25 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, nu NewOrg) (Or
 		return Org{}, fmt.Errorf("addmember: %w", err)
 	}
 
+	// Provision a free subscription for the new org.
+	freePlan, err := b.storer.QueryPlanBySlug(ctx, "free")
+	if err != nil {
+		return Org{}, fmt.Errorf("queryplanbyslug: %w", err)
+	}
+
+	sub := Subscription{
+		SubscriptionID: uuid.New(),
+		OrgID:          org.ID,
+		PlanID:         freePlan.PlanID,
+		Status:         StatusActive,
+		DateCreated:    now,
+		DateUpdated:    now,
+	}
+
+	if err := b.storer.CreateSubscription(ctx, sub); err != nil {
+		return Org{}, fmt.Errorf("createsubscription: %w", err)
+	}
+
 	return org, nil
 }
 
@@ -226,8 +261,7 @@ func (b *Business) QueryBySlug(ctx context.Context, slug string) (Org, error) {
 }
 
 // QueryByUserID returns all orgs the given user is a member of, including
-// their role in each org. This is what the frontend calls after login to
-// know which workspaces the user can switch into.
+// their role in each org.
 func (b *Business) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]UserOrg, error) {
 	orgs, err := b.storer.QueryByUserID(ctx, userID)
 	if err != nil {
@@ -321,14 +355,34 @@ func (b *Business) QueryMembers(ctx context.Context, orgID uuid.UUID) ([]OrgMemb
 	return members, nil
 }
 
-// QueryMembersWithUsers returns all members of an org with their full user
-// profiles resolved in a single JOIN query.
+// QueryMembersWithUsers returns all members of an org with their full user profiles.
 func (b *Business) QueryMembersWithUsers(ctx context.Context, orgID uuid.UUID) ([]OrgMemberUser, error) {
 	members, err := b.storer.QueryMembersWithUsers(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("querymemberswithusers: %w", err)
 	}
 	return members, nil
+}
+
+// =============================================================================
+// Plans
+
+// QueryAllPlans returns all active billing plans from the catalog.
+func (b *Business) QueryAllPlans(ctx context.Context) ([]Plan, error) {
+	plans, err := b.storer.QueryAllPlans(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("queryallplans: %w", err)
+	}
+	return plans, nil
+}
+
+// QueryPlanBySlug returns a single plan by its slug.
+func (b *Business) QueryPlanBySlug(ctx context.Context, slug string) (Plan, error) {
+	plan, err := b.storer.QueryPlanBySlug(ctx, slug)
+	if err != nil {
+		return Plan{}, fmt.Errorf("queryplanbyslug: %w", err)
+	}
+	return plan, nil
 }
 
 // =============================================================================
@@ -339,14 +393,13 @@ func (b *Business) CreateSubscription(ctx context.Context, actorID uuid.UUID, ns
 	now := time.Now()
 
 	sub := Subscription{
-		SubscriptionID: uuid.New(),
-		OrgID:          ns.OrgID,
-		Plan:           ns.Plan,
-		Status:         ns.Status,
-		PeriodStart:    ns.PeriodStart,
-		PeriodEnd:      ns.PeriodEnd,
-		DateCreated:    now,
-		DateUpdated:    now,
+		SubscriptionID:    uuid.New(),
+		OrgID:             ns.OrgID,
+		PlanID:            ns.PlanID,
+		Status:            ns.Status,
+		CancelAtPeriodEnd: false,
+		DateCreated:       now,
+		DateUpdated:       now,
 	}
 
 	if err := b.storer.CreateSubscription(ctx, sub); err != nil {
@@ -356,19 +409,31 @@ func (b *Business) CreateSubscription(ctx context.Context, actorID uuid.UUID, ns
 	return sub, nil
 }
 
-// UpdateSubscription modifies an existing subscription (e.g. on a Stripe webhook).
+// UpdateSubscription modifies an existing subscription.
 func (b *Business) UpdateSubscription(ctx context.Context, actorID uuid.UUID, sub Subscription, us UpdateSubscription) (Subscription, error) {
-	if us.Plan != nil {
-		sub.Plan = *us.Plan
+	if us.PlanID != nil {
+		sub.PlanID = *us.PlanID
 	}
 	if us.Status != nil {
 		sub.Status = *us.Status
 	}
+	if us.StripeCustomerID != nil {
+		sub.StripeCustomerID = *us.StripeCustomerID
+	}
+	if us.StripeSubscriptionID != nil {
+		sub.StripeSubscriptionID = *us.StripeSubscriptionID
+	}
+	if us.CancelAtPeriodEnd != nil {
+		sub.CancelAtPeriodEnd = *us.CancelAtPeriodEnd
+	}
+	if us.CancelledAt != nil {
+		sub.CancelledAt = us.CancelledAt
+	}
 	if us.PeriodStart != nil {
-		sub.PeriodStart = *us.PeriodStart
+		sub.PeriodStart = us.PeriodStart
 	}
 	if us.PeriodEnd != nil {
-		sub.PeriodEnd = *us.PeriodEnd
+		sub.PeriodEnd = us.PeriodEnd
 	}
 	sub.DateUpdated = time.Now()
 
@@ -386,4 +451,22 @@ func (b *Business) QuerySubscription(ctx context.Context, orgID uuid.UUID) (Subs
 		return Subscription{}, fmt.Errorf("querysubscription: %w", err)
 	}
 	return sub, nil
+}
+
+// UpsertSubscription inserts or replaces a subscription row by org_id.
+// Used by the Stripe webhook after a successful checkout.
+func (b *Business) UpsertSubscription(ctx context.Context, sub Subscription) error {
+	if err := b.storer.UpsertSubscription(ctx, sub); err != nil {
+		return fmt.Errorf("upsertsubscription: %w", err)
+	}
+	return nil
+}
+
+// UpdateSubscriptionByStripeID updates a subscription row identified by its
+// Stripe subscription ID. Used by webhook events that don't know the org ID.
+func (b *Business) UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID string, sub Subscription) error {
+	if err := b.storer.UpdateSubscriptionByStripeID(ctx, stripeSubID, sub); err != nil {
+		return fmt.Errorf("updatesubscriptionbystripeid: %w", err)
+	}
+	return nil
 }

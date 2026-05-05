@@ -79,6 +79,13 @@ type BusConfig struct {
 	AnalyzeBus     *analyzebus.Business
 }
 
+// BillingConfig contains Stripe billing configuration.
+type BillingConfig struct {
+	StripeSecretKey     string
+	StripeWebhookSecret string
+	AppBaseURL          string
+}
+
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
 	Build          string
@@ -88,6 +95,7 @@ type Config struct {
 	BusConfig      BusConfig
 	IngestorConfig IngestorConfig
 	AuthConfig     AuthConfig
+	BillingConfig  BillingConfig
 	EmailConfig    *emailer.Config
 	EmailBaseURL   string
 	SupportEmail   string

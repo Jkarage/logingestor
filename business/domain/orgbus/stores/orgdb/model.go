@@ -1,6 +1,7 @@
 package orgdb
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -205,35 +206,131 @@ func toBusOrgMemberUsers(dbs []orgMemberUserDB) ([]orgbus.OrgMemberUser, error) 
 }
 
 // =============================================================================
-// Subscriptions
+// Plans
 
-// subscriptionDB is the database representation of a subscriptions row.
-type subscriptionDB struct {
-	SubscriptionID uuid.UUID `db:"subscription_id"`
-	OrgID          uuid.UUID `db:"org_id"`
-	Plan           string    `db:"plan"`
-	Status         string    `db:"status"`
-	PeriodStart    time.Time `db:"period_start"`
-	PeriodEnd      time.Time `db:"period_end"`
-	DateCreated    time.Time `db:"date_created"`
-	DateUpdated    time.Time `db:"date_updated"`
+// planDB is the database representation of a plans row.
+type planDB struct {
+	ID            uuid.UUID `db:"id"`
+	Slug          string    `db:"slug"`
+	Name          string    `db:"name"`
+	PriceCents    int       `db:"price_cents"`
+	Interval      string    `db:"interval"`
+	StripePriceID *string   `db:"stripe_price_id"`
+	Features      []byte    `db:"features"`
+	IsActive      bool      `db:"is_active"`
+	CreatedAt     time.Time `db:"created_at"`
 }
 
-func toDBSubscription(bus orgbus.Subscription) subscriptionDB {
-	return subscriptionDB{
-		SubscriptionID: bus.SubscriptionID,
-		OrgID:          bus.OrgID,
-		Plan:           bus.Plan.String(),
-		Status:         bus.Status.String(),
-		PeriodStart:    bus.PeriodStart.UTC(),
-		PeriodEnd:      bus.PeriodEnd.UTC(),
-		DateCreated:    bus.DateCreated.UTC(),
-		DateUpdated:    bus.DateUpdated.UTC(),
+func toBusPlan(db planDB) (orgbus.Plan, error) {
+	slug, err := orgbus.ParseSubscriptionPlan(db.Slug)
+	if err != nil {
+		return orgbus.Plan{}, fmt.Errorf("parse plan slug: %w", err)
+	}
+
+	var features orgbus.PlanFeatures
+	if err := json.Unmarshal(db.Features, &features); err != nil {
+		return orgbus.Plan{}, fmt.Errorf("unmarshal plan features: %w", err)
+	}
+
+	priceID := ""
+	if db.StripePriceID != nil {
+		priceID = *db.StripePriceID
+	}
+
+	return orgbus.Plan{
+		PlanID:        db.ID,
+		Slug:          slug,
+		Name:          db.Name,
+		PriceCents:    db.PriceCents,
+		Interval:      db.Interval,
+		StripePriceID: priceID,
+		Features:      features,
+		IsActive:      db.IsActive,
+		CreatedAt:     db.CreatedAt.In(time.Local),
+	}, nil
+}
+
+func toBusPlans(dbs []planDB) ([]orgbus.Plan, error) {
+	plans := make([]orgbus.Plan, len(dbs))
+	for i, db := range dbs {
+		var err error
+		plans[i], err = toBusPlan(db)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return plans, nil
+}
+
+// =============================================================================
+// Subscriptions
+
+// subscriptionDB is the database representation of a subscriptions row joined
+// with its plan.
+type subscriptionDB struct {
+	SubscriptionID       uuid.UUID  `db:"subscription_id"`
+	OrgID                uuid.UUID  `db:"org_id"`
+	PlanID               uuid.UUID  `db:"plan_id"`
+	PlanSlug             string     `db:"plan_slug"`
+	PlanName             string     `db:"plan_name"`
+	PlanFeatures         []byte     `db:"plan_features"`
+	Status               string     `db:"status"`
+	StripeCustomerID     *string    `db:"stripe_customer_id"`
+	StripeSubscriptionID *string    `db:"stripe_subscription_id"`
+	CancelAtPeriodEnd    bool       `db:"cancel_at_period_end"`
+	CancelledAt          *time.Time `db:"cancelled_at"`
+	PeriodStart          *time.Time `db:"period_start"`
+	PeriodEnd            *time.Time `db:"period_end"`
+	DateCreated          time.Time  `db:"date_created"`
+	DateUpdated          time.Time  `db:"date_updated"`
+}
+
+// subscriptionWriteDB is used for INSERT/UPDATE where we don't need plan JOIN fields.
+type subscriptionWriteDB struct {
+	SubscriptionID       uuid.UUID  `db:"subscription_id"`
+	OrgID                uuid.UUID  `db:"org_id"`
+	PlanID               uuid.UUID  `db:"plan_id"`
+	Status               string     `db:"status"`
+	StripeCustomerID     *string    `db:"stripe_customer_id"`
+	StripeSubscriptionID *string    `db:"stripe_subscription_id"`
+	CancelAtPeriodEnd    bool       `db:"cancel_at_period_end"`
+	CancelledAt          *time.Time `db:"cancelled_at"`
+	PeriodStart          *time.Time `db:"period_start"`
+	PeriodEnd            *time.Time `db:"period_end"`
+	DateCreated          time.Time  `db:"date_created"`
+	DateUpdated          time.Time  `db:"date_updated"`
+}
+
+func toWriteDBSubscription(bus orgbus.Subscription) subscriptionWriteDB {
+	var custID *string
+	if bus.StripeCustomerID != "" {
+		s := bus.StripeCustomerID
+		custID = &s
+	}
+	var subID *string
+	if bus.StripeSubscriptionID != "" {
+		s := bus.StripeSubscriptionID
+		subID = &s
+	}
+
+	return subscriptionWriteDB{
+		SubscriptionID:       bus.SubscriptionID,
+		OrgID:                bus.OrgID,
+		PlanID:               bus.PlanID,
+		Status:               bus.Status.String(),
+		StripeCustomerID:     custID,
+		StripeSubscriptionID: subID,
+		CancelAtPeriodEnd:    bus.CancelAtPeriodEnd,
+		CancelledAt:          bus.CancelledAt,
+		PeriodStart:          bus.PeriodStart,
+		PeriodEnd:            bus.PeriodEnd,
+		DateCreated:          bus.DateCreated.UTC(),
+		DateUpdated:          bus.DateUpdated.UTC(),
 	}
 }
 
 func toBusSubscription(db subscriptionDB) (orgbus.Subscription, error) {
-	plan, err := orgbus.ParseSubscriptionPlan(db.Plan)
+	plan, err := orgbus.ParseSubscriptionPlan(db.PlanSlug)
 	if err != nil {
 		return orgbus.Subscription{}, fmt.Errorf("parse plan: %w", err)
 	}
@@ -243,14 +340,45 @@ func toBusSubscription(db subscriptionDB) (orgbus.Subscription, error) {
 		return orgbus.Subscription{}, fmt.Errorf("parse status: %w", err)
 	}
 
+	var features orgbus.PlanFeatures
+	if err := json.Unmarshal(db.PlanFeatures, &features); err != nil {
+		return orgbus.Subscription{}, fmt.Errorf("unmarshal features: %w", err)
+	}
+
+	custID := ""
+	if db.StripeCustomerID != nil {
+		custID = *db.StripeCustomerID
+	}
+	subID := ""
+	if db.StripeSubscriptionID != nil {
+		subID = *db.StripeSubscriptionID
+	}
+
+	var periodStart, periodEnd *time.Time
+	if db.PeriodStart != nil {
+		t := db.PeriodStart.In(time.Local)
+		periodStart = &t
+	}
+	if db.PeriodEnd != nil {
+		t := db.PeriodEnd.In(time.Local)
+		periodEnd = &t
+	}
+
 	return orgbus.Subscription{
-		SubscriptionID: db.SubscriptionID,
-		OrgID:          db.OrgID,
-		Plan:           plan,
-		Status:         status,
-		PeriodStart:    db.PeriodStart.In(time.Local),
-		PeriodEnd:      db.PeriodEnd.In(time.Local),
-		DateCreated:    db.DateCreated.In(time.Local),
-		DateUpdated:    db.DateUpdated.In(time.Local),
+		SubscriptionID:       db.SubscriptionID,
+		OrgID:                db.OrgID,
+		PlanID:               db.PlanID,
+		Plan:                 plan,
+		PlanName:             db.PlanName,
+		PlanFeatures:         features,
+		Status:               status,
+		StripeCustomerID:     custID,
+		StripeSubscriptionID: subID,
+		CancelAtPeriodEnd:    db.CancelAtPeriodEnd,
+		CancelledAt:          db.CancelledAt,
+		PeriodStart:          periodStart,
+		PeriodEnd:            periodEnd,
+		DateCreated:          db.DateCreated.In(time.Local),
+		DateUpdated:          db.DateUpdated.In(time.Local),
 	}, nil
 }

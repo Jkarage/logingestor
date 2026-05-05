@@ -254,3 +254,54 @@ CREATE INDEX IF NOT EXISTS idx_audit_org_ts ON audit (org_id, timestamp DESC);
 -- Description: Add retention_days to projects table
 ALTER TABLE projects
 ADD COLUMN IF NOT EXISTS retention_days INT NULL;
+-- Version: 1.19
+-- Description: Add billing plans table and extend subscriptions for Stripe
+CREATE TABLE IF NOT EXISTS plans (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug            TEXT UNIQUE NOT NULL,
+    name            TEXT NOT NULL,
+    price_cents     INT  NOT NULL DEFAULT 0,
+    interval        TEXT NOT NULL DEFAULT 'month',
+    stripe_price_id TEXT,
+    features        JSONB NOT NULL DEFAULT '{}',
+    is_active       BOOLEAN NOT NULL DEFAULT true,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+INSERT INTO plans (slug, name, price_cents, stripe_price_id, features) VALUES
+    ('free', 'Free', 0, NULL, '{"log_retention_days":7,"max_projects":3,"max_members":5}'),
+    ('pro', 'Pro', 500, NULL, '{"log_retention_days":90,"max_projects":-1,"max_members":-1}'),
+    ('enterprise', 'Enterprise', -1, NULL, '{"log_retention_days":-1,"max_projects":-1,"max_members":-1}')
+ON CONFLICT (slug) DO NOTHING;
+ALTER TABLE subscriptions
+    ADD COLUMN IF NOT EXISTS plan_id                UUID REFERENCES plans(id),
+    ADD COLUMN IF NOT EXISTS stripe_customer_id     TEXT,
+    ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT,
+    ADD COLUMN IF NOT EXISTS cancel_at_period_end   BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS cancelled_at           TIMESTAMPTZ;
+ALTER TABLE subscriptions
+    ALTER COLUMN period_start DROP NOT NULL,
+    ALTER COLUMN period_end   DROP NOT NULL;
+UPDATE subscriptions s
+SET plan_id = p.id
+FROM plans p
+WHERE p.slug = s.plan::text
+  AND s.plan_id IS NULL;
+ALTER TABLE subscriptions ALTER COLUMN plan_id SET NOT NULL;
+ALTER TABLE subscriptions DROP CONSTRAINT IF EXISTS subscriptions_one_active;
+DO $$ BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'subscriptions_org_unique'
+    ) THEN
+        ALTER TABLE subscriptions ADD CONSTRAINT subscriptions_org_unique UNIQUE (org_id);
+    END IF;
+END $$;
+ALTER TABLE subscriptions DROP COLUMN IF EXISTS plan;
+INSERT INTO subscriptions (org_id, plan_id, status, cancel_at_period_end)
+SELECT o.id, p.id, 'active', false
+FROM organizations o
+CROSS JOIN plans p
+WHERE p.slug = 'free'
+  AND NOT EXISTS (
+      SELECT 1 FROM subscriptions s WHERE s.org_id = o.id
+  );
