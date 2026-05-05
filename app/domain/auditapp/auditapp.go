@@ -4,6 +4,7 @@ package auditapp
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
@@ -31,7 +32,7 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	pg, err := page.Parse(qp.Page, qp.Rows)
+	pg, err := page.Parse(qp.Page, "10")
 	if err != nil {
 		return errs.NewFieldErrors("page", err)
 	}
@@ -56,9 +57,15 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
+	nextCursor := ""
+	if pg.Number()*pg.RowsPerPage() < total {
+		nextCursor = strconv.Itoa(pg.Number() + 1)
+	}
+
 	return AuditResult{
-		Entries: toAppAudits(adts),
-		Total:   total,
+		Entries:    toAppAudits(adts),
+		Total:      total,
+		NextCursor: nextCursor,
 	}
 }
 
@@ -74,7 +81,7 @@ func (a *app) queryByOrg(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	pg, err := page.Parse(qp.Page, qp.Rows)
+	pg, err := page.Parse(qp.Page, "10")
 	if err != nil {
 		return errs.NewFieldErrors("page", err)
 	}
@@ -102,8 +109,14 @@ func (a *app) queryByOrg(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "count: %s", err)
 	}
 
+	nextCursor := ""
+	if pg.Number()*pg.RowsPerPage() < total {
+		nextCursor = strconv.Itoa(pg.Number() + 1)
+	}
+
 	return AuditResult{
-		Entries: toAppAudits(adts),
-		Total:   total,
+		Entries:    toAppAudits(adts),
+		Total:      total,
+		NextCursor: nextCursor,
 	}
 }
