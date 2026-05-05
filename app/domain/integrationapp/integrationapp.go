@@ -402,7 +402,8 @@ func (a *app) deleteRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
-	if _, err := a.integrationBus.QueryRuleByID(ctx, ruleID); err != nil {
+	rule, err := a.integrationBus.QueryRuleByID(ctx, ruleID)
+	if err != nil {
 		if errors.Is(err, integrationbus.ErrRuleNotFound) {
 			return errs.New(errs.NotFound, err)
 		}
@@ -415,15 +416,24 @@ func (a *app) deleteRule(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "deleterule: ruleID[%s]: %s", ruleID, err)
 	}
 
+	auditData := map[string]any{
+		"name":          rule.Name,
+		"level":         rule.Level,
+		"connection_id": rule.ConnectionID.String(),
+	}
+	if rule.ProjectID != nil {
+		auditData["project_id"] = rule.ProjectID.String()
+	}
+
 	a.auditBus.Create(ctx, auditbus.NewAudit{ //nolint:errcheck
 		OrgID:     orgID,
 		ObjID:     ruleID,
 		ObjDomain: domain.Rule,
-		ObjName:   "",
+		ObjName:   rule.Name,
 		ActorID:   actorID,
 		Action:    "rule.deleted",
-		Data:      nil,
-		Message:   "alert rule deleted",
+		Data:      auditData,
+		Message:   fmt.Sprintf("alert rule %q (level: %s) deleted", rule.Name, rule.Level),
 	})
 
 	return deleteRuleResponse{Deleted: true}
