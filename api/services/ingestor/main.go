@@ -289,6 +289,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 		"email":     providers.NewEmail(em),
 		"opsgenie":  providers.NewOpsGenie(),
 		"jira":      providers.NewJira(),
+		"twilio":    providers.NewTwilio(),
+		"beemsms":   providers.NewBeemSMS(),
 	}
 
 	integrationStorage := integrationdb.NewStore(log, db, encKey)

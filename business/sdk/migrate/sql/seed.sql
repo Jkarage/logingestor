@@ -1,22 +1,102 @@
-INSERT INTO integration_providers (id, name, icon, type, description, fields, sort_order) VALUES
-  ('slack',     'Slack',     '💬', 'Messaging', 'Send alerts to Slack channels via webhook.',
-   '[{"k":"webhookUrl","label":"Webhook URL","ph":"https://hooks.slack.com/services/..."}]', 1),
-  ('discord',   'Discord',   '🎮', 'Messaging', 'Forward log alerts to Discord via webhook.',
-   '[{"k":"webhookUrl","label":"Webhook URL","ph":"https://discord.com/api/webhooks/..."}]', 2),
-  ('telegram',  'Telegram',  '✈️', 'Messaging', 'Receive alerts as Telegram bot messages.',
-   '[{"k":"botToken","label":"Bot Token","ph":"123456:ABC..."},{"k":"chatId","label":"Chat ID","ph":"-100123"}]', 3),
-  ('pagerduty', 'PagerDuty', '🚨', 'Incident',  'Auto-create PagerDuty incidents on critical errors.',
-   '[{"k":"apiKey","label":"API Key","ph":"u+xxxxxxxx"},{"k":"serviceId","label":"Service ID","ph":"P1234AB"}]', 4),
-  ('webhook',   'Webhook',   '🔗', 'Custom',    'POST structured JSON to any HTTP endpoint.',
-   '[{"k":"url","label":"Target URL","ph":"https://yourapp.com/hook"},{"k":"secret","label":"Secret","ph":"optional HMAC secret"}]', 5),
-  ('email',     'Email',     '📧', 'Notify',    'Send email alerts when log events trigger.',
-   '[{"k":"to","label":"To Address","ph":"team@co.com"}]', 6),
-  ('opsgenie',  'OpsGenie',  '🔔', 'Incident',  'Create OpsGenie alerts for on-call escalation.',
-   '[{"k":"apiKey","label":"API Key","ph":"xxxx-xxxx-xxxx"}]', 7),
-  ('jira',      'Jira',      '🧩', 'Ticketing', 'Open Jira issues automatically on ERROR logs.',
-   '[{"k":"domain","label":"Domain","ph":"org.atlassian.net"},{"k":"email","label":"Account Email","ph":"you@org.com"},{"k":"token","label":"API Token","ph":"ATATT..."},{"k":"project","label":"Project Key","ph":"ENG"}]', 8)
-ON CONFLICT (id) DO NOTHING;
-
+INSERT INTO integration_providers (
+		id,
+		name,
+		icon,
+		type,
+		description,
+		fields,
+		sort_order
+	)
+VALUES (
+		'slack',
+		'Slack',
+		'💬',
+		'Messaging',
+		'Send alerts to Slack channels via webhook.',
+		'[{"k":"webhookUrl","label":"Webhook URL","ph":"https://hooks.slack.com/services/..."}]',
+		1
+	),
+	(
+		'discord',
+		'Discord',
+		'🎮',
+		'Messaging',
+		'Forward log alerts to Discord via webhook.',
+		'[{"k":"webhookUrl","label":"Webhook URL","ph":"https://discord.com/api/webhooks/..."}]',
+		2
+	),
+	(
+		'telegram',
+		'Telegram',
+		'✈️',
+		'Messaging',
+		'Receive alerts as Telegram bot messages.',
+		'[{"k":"botToken","label":"Bot Token","ph":"123456:ABC..."},{"k":"chatId","label":"Chat ID","ph":"-100123"}]',
+		3
+	),
+	(
+		'pagerduty',
+		'PagerDuty',
+		'🚨',
+		'Incident',
+		'Auto-create PagerDuty incidents on critical errors.',
+		'[{"k":"apiKey","label":"API Key","ph":"u+xxxxxxxx"},{"k":"serviceId","label":"Service ID","ph":"P1234AB"}]',
+		4
+	),
+	(
+		'webhook',
+		'Webhook',
+		'🔗',
+		'Custom',
+		'POST structured JSON to any HTTP endpoint.',
+		'[{"k":"url","label":"Target URL","ph":"https://yourapp.com/hook"},{"k":"secret","label":"Secret","ph":"optional HMAC secret"}]',
+		5
+	),
+	(
+		'email',
+		'Email',
+		'📧',
+		'Notify',
+		'Send email alerts when log events trigger.',
+		'[{"k":"to","label":"To Address","ph":"team@co.com"}]',
+		6
+	),
+	(
+		'opsgenie',
+		'OpsGenie',
+		'🔔',
+		'Incident',
+		'Create OpsGenie alerts for on-call escalation.',
+		'[{"k":"apiKey","label":"API Key","ph":"xxxx-xxxx-xxxx"}]',
+		7
+	),
+	(
+		'jira',
+		'Jira',
+		'🧩',
+		'Ticketing',
+		'Open Jira issues automatically on ERROR logs.',
+		'[{"k":"domain","label":"Domain","ph":"org.atlassian.net"},{"k":"email","label":"Account Email","ph":"you@org.com"},{"k":"token","label":"API Token","ph":"ATATT..."},{"k":"project","label":"Project Key","ph":"ENG"}]',
+		8
+	),
+	(
+		'twilio',
+		'Twilio',
+		'📱',
+		'SMS',
+		'Send SMS alerts to a phone number via Twilio.',
+		'[{"k":"accountSid","label":"Account SID","ph":"ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},{"k":"authToken","label":"Auth Token","ph":""},{"k":"from","label":"From Number","ph":"+12345678900"},{"k":"to","label":"To Number","ph":"+12345678900"}]',
+		9
+	),
+	(
+		'beemsms',
+		'Beem Africa',
+		'📲',
+		'SMS',
+		'Send SMS alerts via Beem Africa.',
+		'[{"k":"apiKey","label":"API Key","ph":""},{"k":"secretKey","label":"Secret Key","ph":""},{"k":"senderId","label":"Sender ID","ph":"MYAPP"},{"k":"to","label":"To Number","ph":"+255700000000"}]',
+		10
+	) ON CONFLICT (id) DO NOTHING;
 INSERT INTO users (
 		id,
 		name,
