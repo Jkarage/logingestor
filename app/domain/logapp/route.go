@@ -37,10 +37,11 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodPost, version, "/projects/{project_id}/logs/{log_id}/analyze", a.analyze, authen)
 
 	// The stream endpoint upgrades to WebSocket. It MUST bypass the app-level
-	// middleware stack (logging, error handling, panics) because those middleware
+	// middleware stack (logging, error handling) because those middleware
 	// functions capture the http.ResponseWriter before the upgrade and may write
 	// to it after the connection has been hijacked, which corrupts the WS frames
 	// and causes "WebSocket is closed before the connection is established".
+	// Panic recovery is still applied by RawHandlerFuncNoMid itself.
 	// Authentication is handled manually inside a.stream via the ?token= param.
 	app.RawHandlerFuncNoMid(http.MethodGet, version, "/projects/{project_id}/logs/stream", a.stream)
 }

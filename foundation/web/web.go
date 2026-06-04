@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"runtime/debug"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -127,11 +128,31 @@ func (a *App) EnableCORS(origins []string) {
 	a.origins = origins
 }
 
+// recoverHandler wraps a raw http.HandlerFunc with panic recovery. Routes
+// registered without the application middleware skip mid.Panics(), so without
+// this wrapper a panic escapes to net/http's own recover, which kills the
+// connection and bypasses our logging. On panic the wrapper logs the stack and
+// attempts a 500; if the connection was hijacked (WebSocket upgrade) the write
+// is a harmless no-op.
+func (a *App) recoverHandler(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				trace := debug.Stack()
+				a.log(r.Context(), "PANIC", "method", r.Method, "path", r.URL.Path, "panic", fmt.Sprintf("%v", rec), "trace", string(trace))
+				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			}
+		}()
+
+		handler(w, r)
+	}
+}
+
 // HandlerFuncNoMid sets a handler function for a given HTTP method and path
 // pair to the application server mux. Does not include the application
 // middleware or OTEL tracing.
 func (a *App) HandlerFuncNoMid(method string, group string, path string, handlerFunc HandlerFunc) {
-	h := func(w http.ResponseWriter, r *http.Request) {
+	h := a.recoverHandler(func(w http.ResponseWriter, r *http.Request) {
 		ctx := setWriter(r.Context(), w)
 
 		resp := handlerFunc(ctx, r)
@@ -140,7 +161,7 @@ func (a *App) HandlerFuncNoMid(method string, group string, path string, handler
 			a.log(ctx, "web-respond", "ERROR", err)
 			return
 		}
-	}
+	})
 
 	finalPath := path
 	if group != "" {
@@ -184,7 +205,9 @@ func (a *App) HandlerFunc(method string, group string, path string, handlerFunc 
 // pair to the application server mux, with NO middleware applied (not even the
 // global app middleware). This is required for WebSocket upgrade handlers because
 // the app middleware captures http.ResponseWriter before the upgrade and may
-// interfere with the hijacked connection.
+// interfere with the hijacked connection. Panic recovery is still applied: it
+// only touches the ResponseWriter when a panic occurs, and writing to an
+// already-hijacked connection is a no-op rather than frame corruption.
 func (a *App) RawHandlerFuncNoMid(method string, group string, path string, rawHandlerFunc http.HandlerFunc) {
 	finalPath := path
 	if group != "" {
@@ -192,7 +215,7 @@ func (a *App) RawHandlerFuncNoMid(method string, group string, path string, rawH
 	}
 	finalPath = fmt.Sprintf("%s %s", method, finalPath)
 
-	a.mux.HandleFunc(finalPath, rawHandlerFunc)
+	a.mux.HandleFunc(finalPath, a.recoverHandler(rawHandlerFunc))
 }
 
 // RawHandlerFunc sets a raw handler function for a given HTTP method and path
