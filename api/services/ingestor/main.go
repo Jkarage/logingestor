@@ -329,6 +329,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 	cfgMux := mux.Config{
 		Build: tag,
 		Log:   log,
+		DB:    db,
 		BusConfig: mux.BusConfig{
 			AuditBus:       auditBus,
 			UserBus:        userBus,

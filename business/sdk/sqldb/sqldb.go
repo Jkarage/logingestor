@@ -88,6 +88,12 @@ func Open(cfg Config) (*sqlx.DB, error) {
 // returns a non-nil error otherwise.
 func StatusCheck(ctx context.Context, db *sqlx.DB) error {
 
+	// A nil DB means the caller was never wired with a connection. Report it
+	// as a status failure instead of panicking on the Ping below.
+	if db == nil {
+		return errors.New("statuscheck: nil database connection")
+	}
+
 	// If the user doesn't give us a deadline set 1 second.
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
