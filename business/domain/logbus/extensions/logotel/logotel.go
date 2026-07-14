@@ -42,9 +42,9 @@ func (ext *Extension) Query(ctx context.Context, filter logbus.QueryFilter, limi
 	return ext.bus.Query(ctx, filter, limit, cursor)
 }
 
-func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error) {
+func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error) {
 	ctx, span := otel.AddSpan(ctx, "business.logbus.stats")
 	defer span.End()
 
-	return ext.bus.Stats(ctx, projectID)
+	return ext.bus.Stats(ctx, projectID, sourceType)
 }

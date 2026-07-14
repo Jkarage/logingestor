@@ -45,6 +45,12 @@ import (
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectaudit"
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectotel"
 	"github.com/jkarage/logingestor/business/domain/projectbus/stores/projectdb"
+	"github.com/jkarage/logingestor/business/domain/sourcebus"
+	"github.com/jkarage/logingestor/business/domain/sourcebus/extensions/sourceaudit"
+	"github.com/jkarage/logingestor/business/domain/sourcebus/extensions/sourceotel"
+	"github.com/jkarage/logingestor/business/domain/sourcebus/stores/sourcedb"
+	"github.com/jkarage/logingestor/business/domain/usagebus"
+	"github.com/jkarage/logingestor/business/domain/usagebus/stores/usagedb"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/useraudit"
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
@@ -306,6 +312,14 @@ func run(ctx context.Context, log *logger.Logger) error {
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
 
+	sourceOtelExt := sourceotel.NewExtension()
+	sourceAuditExt := sourceaudit.NewExtension(auditBus)
+	sourceStorage := sourcedb.NewStore(log, db)
+	sourceBus := sourcebus.NewBusiness(log, sourceStorage, sourceOtelExt, sourceAuditExt)
+
+	usageStorage := usagedb.NewStore(log, db)
+	usageBus := usagebus.NewBusiness(log, usageStorage)
+
 	analyzeBus := analyzebus.NewBusiness(log, cfg.AI.CerebriumBaseURL, cfg.AI.CerebriumAPIKey)
 
 	// -------------------------------------------------------------------------
@@ -339,6 +353,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			LogBus:         logBus,
 			IntegrationBus: integrationBus,
 			AnalyzeBus:     analyzeBus,
+			SourceBus:      sourceBus,
+			UsageBus:       usageBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

@@ -305,3 +305,69 @@ WHERE p.slug = 'free'
   AND NOT EXISTS (
       SELECT 1 FROM subscriptions s WHERE s.org_id = o.id
   );
+-- Version: 1.20
+-- Description: Create sources table (tenant infrastructure-log ingestion)
+CREATE TABLE IF NOT EXISTS sources (
+    id                 UUID NOT NULL DEFAULT gen_random_uuid(),
+    org_id             UUID NOT NULL,
+    project_id         UUID NOT NULL,
+    kind               TEXT NOT NULL CHECK (kind IN ('otel','syslog','fluentbit','vector','k8s','http')),
+    name               TEXT NOT NULL,
+    key_prefix         TEXT NOT NULL,
+    key_hash           TEXT NOT NULL,
+    is_active          BOOLEAN NOT NULL DEFAULT TRUE,
+    last_seen_at       TIMESTAMPTZ,
+    rate_limit_per_sec INT NOT NULL DEFAULT 500,
+    rate_limit_burst   INT NOT NULL DEFAULT 1000,
+    sample_debug_info  NUMERIC NOT NULL DEFAULT 1.0,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT sources_pkey PRIMARY KEY (id),
+    CONSTRAINT sources_org_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT sources_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT sources_org_name_unique UNIQUE (org_id, name)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS sources_key_hash_idx ON sources (key_hash);
+CREATE INDEX IF NOT EXISTS sources_org_idx ON sources (org_id);
+-- Version: 1.21
+-- Description: Add infrastructure-log dimensions to logs table
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS source_type TEXT NOT NULL DEFAULT 'app' CHECK (source_type IN ('app','infra'));
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS source_id UUID;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS host TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS container TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS pod TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS namespace TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS cluster TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS unit TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS facility TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS region TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS cloud_resource_id TEXT;
+ALTER TABLE logs ADD COLUMN IF NOT EXISTS attributes JSONB NOT NULL DEFAULT '{}';
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'logs_source_fk') THEN
+        ALTER TABLE logs ADD CONSTRAINT logs_source_fk FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS logs_project_sourcetype_ts_idx ON logs (project_id, source_type, ts DESC);
+CREATE INDEX IF NOT EXISTS logs_source_ts_idx ON logs (source_id, ts DESC);
+CREATE INDEX IF NOT EXISTS logs_host_idx ON logs (host);
+CREATE INDEX IF NOT EXISTS logs_unit_idx ON logs (unit);
+CREATE INDEX IF NOT EXISTS logs_namespace_idx ON logs (namespace);
+-- Version: 1.22
+-- Description: Create ingest_usage table (daily per-source counters for quota + billing)
+CREATE TABLE IF NOT EXISTS ingest_usage (
+    source_id     UUID NOT NULL,
+    org_id        UUID NOT NULL,
+    project_id    UUID NOT NULL,
+    day           DATE NOT NULL,
+    event_count   BIGINT NOT NULL DEFAULT 0,
+    byte_count    BIGINT NOT NULL DEFAULT 0,
+    dropped_count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ingest_usage_pkey PRIMARY KEY (source_id, day),
+    CONSTRAINT ingest_usage_source_fk FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS ingest_usage_org_day_idx ON ingest_usage (org_id, day);
+-- Version: 1.23
+-- Description: Add infra retention + daily quota limits to plan features
+UPDATE plans SET features = features || '{"infra_retention_days":7,"infra_daily_event_quota":1000000}'::jsonb WHERE slug = 'free';
+UPDATE plans SET features = features || '{"infra_retention_days":14,"infra_daily_event_quota":50000000}'::jsonb WHERE slug = 'pro';
+UPDATE plans SET features = features || '{"infra_retention_days":-1,"infra_daily_event_quota":-1}'::jsonb WHERE slug = 'enterprise';

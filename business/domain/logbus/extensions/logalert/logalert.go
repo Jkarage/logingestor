@@ -92,6 +92,6 @@ func (ext *Extension) Query(ctx context.Context, filter logbus.QueryFilter, limi
 	return ext.bus.Query(ctx, filter, limit, cursor)
 }
 
-func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error) {
-	return ext.bus.Stats(ctx, projectID)
+func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error) {
+	return ext.bus.Stats(ctx, projectID, sourceType)
 }

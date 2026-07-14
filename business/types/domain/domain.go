@@ -13,6 +13,7 @@ var (
 	Invitation  = newDomain("INVITATION")
 	Integration = newDomain("INTEGRATION")
 	Rule        = newDomain("RULE")
+	Source      = newDomain("SOURCE")
 )
 
 // =============================================================================

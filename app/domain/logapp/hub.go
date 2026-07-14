@@ -6,7 +6,21 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/jkarage/logingestor/business/domain/logbus"
 )
+
+// BroadcastLogs converts persisted logs to their API representation and fans
+// them out to WebSocket subscribers, grouped by project. It is the shared
+// live-tail entry point for both app-log and infra-log ingestion paths.
+func (h *Hub) BroadcastLogs(logs []logbus.Log) {
+	byProject := make(map[uuid.UUID][]LogEntry)
+	for _, l := range logs {
+		byProject[l.ProjectID] = append(byProject[l.ProjectID], toAppLogEntry(l))
+	}
+	for pid, entries := range byProject {
+		h.broadcast(pid, entries)
+	}
+}
 
 // connState wraps a WebSocket connection with its own write mutex.
 // gorilla/websocket requires that only one concurrent goroutine writes

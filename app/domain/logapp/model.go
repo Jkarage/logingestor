@@ -133,14 +133,26 @@ func (r IngestResponse) Encode() ([]byte, string, error) {
 // LogEntry is the API representation of a log row.
 // Note: the frontend expects "pid" (not "projectId"). // TODO: Update the frontend to use project_id.
 type LogEntry struct {
-	ID        string         `json:"id"`
-	PID       string         `json:"pid"`
-	Level     string         `json:"level"`
-	Message   string         `json:"message"`
-	Source    string         `json:"source"`
-	Timestamp string         `json:"timestamp"`
-	Tags      []string       `json:"tags"`
-	Meta      map[string]any `json:"meta"`
+	ID              string         `json:"id"`
+	PID             string         `json:"pid"`
+	Level           string         `json:"level"`
+	Message         string         `json:"message"`
+	Source          string         `json:"source"`
+	Timestamp       string         `json:"timestamp"`
+	Tags            []string       `json:"tags"`
+	Meta            map[string]any `json:"meta"`
+	SourceType      string         `json:"sourceType"`
+	SourceID        *string        `json:"sourceId"`
+	Host            string         `json:"host,omitempty"`
+	Container       string         `json:"container,omitempty"`
+	Pod             string         `json:"pod,omitempty"`
+	Namespace       string         `json:"namespace,omitempty"`
+	Cluster         string         `json:"cluster,omitempty"`
+	Unit            string         `json:"unit,omitempty"`
+	Facility        string         `json:"facility,omitempty"`
+	Region          string         `json:"region,omitempty"`
+	CloudResourceID string         `json:"cloudResourceId,omitempty"`
+	Attributes      map[string]any `json:"attributes"`
 }
 
 func toAppLogEntry(bus logbus.Log) LogEntry {
@@ -152,16 +164,41 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 	if meta == nil {
 		meta = map[string]any{}
 	}
-	return LogEntry{
-		ID:        bus.ID.String(),
-		PID:       bus.ProjectID.String(),
-		Level:     bus.Level.String(),
-		Message:   bus.Message,
-		Source:    bus.Source,
-		Timestamp: bus.Timestamp.UTC().Format(time.RFC3339),
-		Tags:      tags,
-		Meta:      meta,
+	attrs := bus.Attributes
+	if attrs == nil {
+		attrs = map[string]any{}
 	}
+	sourceType := bus.SourceType
+	if sourceType == "" {
+		sourceType = logbus.SourceTypeApp
+	}
+
+	entry := LogEntry{
+		ID:              bus.ID.String(),
+		PID:             bus.ProjectID.String(),
+		Level:           bus.Level.String(),
+		Message:         bus.Message,
+		Source:          bus.Source,
+		Timestamp:       bus.Timestamp.UTC().Format(time.RFC3339),
+		Tags:            tags,
+		Meta:            meta,
+		SourceType:      sourceType,
+		Host:            bus.Infra.Host,
+		Container:       bus.Infra.Container,
+		Pod:             bus.Infra.Pod,
+		Namespace:       bus.Infra.Namespace,
+		Cluster:         bus.Infra.Cluster,
+		Unit:            bus.Infra.Unit,
+		Facility:        bus.Infra.Facility,
+		Region:          bus.Infra.Region,
+		CloudResourceID: bus.Infra.CloudResourceID,
+		Attributes:      attrs,
+	}
+	if bus.SourceID != nil {
+		sid := bus.SourceID.String()
+		entry.SourceID = &sid
+	}
+	return entry
 }
 
 // =============================================================================

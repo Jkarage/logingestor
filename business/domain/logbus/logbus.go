@@ -17,7 +17,7 @@ type Storer interface {
 	BulkInsert(ctx context.Context, logs []Log) error
 	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, afterTs *time.Time, afterID *uuid.UUID) ([]Log, int, error)
-	Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error)
+	Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -26,7 +26,7 @@ type ExtBusiness interface {
 	BulkCreate(ctx context.Context, entries []NewLog) ([]Log, error)
 	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, cursor string) (QueryResult, error)
-	Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error)
+	Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -68,16 +68,28 @@ func (b *Business) BulkCreate(ctx context.Context, entries []NewLog) ([]Log, err
 		if meta == nil {
 			meta = map[string]any{}
 		}
+		attributes := nl.Attributes
+		if attributes == nil {
+			attributes = map[string]any{}
+		}
+		sourceType := nl.SourceType
+		if sourceType == "" {
+			sourceType = SourceTypeApp
+		}
 
 		logs[i] = Log{
-			ID:        uuid.New(),
-			ProjectID: nl.ProjectID,
-			Level:     nl.Level,
-			Message:   nl.Message,
-			Source:    nl.Source,
-			Timestamp: nl.Timestamp,
-			Tags:      tags,
-			Meta:      meta,
+			ID:         uuid.New(),
+			ProjectID:  nl.ProjectID,
+			Level:      nl.Level,
+			Message:    nl.Message,
+			Source:     nl.Source,
+			Timestamp:  nl.Timestamp,
+			Tags:       tags,
+			Meta:       meta,
+			SourceType: sourceType,
+			SourceID:   nl.SourceID,
+			Infra:      nl.Infra,
+			Attributes: attributes,
 		}
 	}
 
@@ -130,9 +142,10 @@ func (b *Business) Query(ctx context.Context, filter QueryFilter, limit int, cur
 	}, nil
 }
 
-// Stats returns per-level counts for a project.
-func (b *Business) Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error) {
-	counts, err := b.storer.Stats(ctx, projectID)
+// Stats returns per-level counts for a project, optionally scoped to a
+// source_type ("app" | "infra"); nil counts all source types.
+func (b *Business) Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error) {
+	counts, err := b.storer.Stats(ctx, projectID, sourceType)
 	if err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
 	}

@@ -5,11 +5,13 @@ import (
 	"github.com/jkarage/logingestor/app/domain/billingapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
 	"github.com/jkarage/logingestor/app/domain/contactapp"
+	"github.com/jkarage/logingestor/app/domain/ingestapp"
 	"github.com/jkarage/logingestor/app/domain/integrationapp"
 	"github.com/jkarage/logingestor/app/domain/invitationapp"
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/domain/orgapp"
 	"github.com/jkarage/logingestor/app/domain/projectapp"
+	"github.com/jkarage/logingestor/app/domain/sourceapp"
 	"github.com/jkarage/logingestor/app/domain/userapp"
 	"github.com/jkarage/logingestor/app/sdk/mux"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -85,6 +87,23 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AnalyzeBus:     cfg.BusConfig.AnalyzeBus,
 		Hub:            cfg.LogHub,
 		AllowedOrigins: cfg.AllowedOrigins,
+	})
+
+	sourceapp.Routes(app, sourceapp.Config{
+		Log:        cfg.Log,
+		Auth:       cfg.AuthConfig.Auth,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+		UserBus:    cfg.BusConfig.UserBus,
+		ProjectBus: cfg.BusConfig.ProjectBus,
+		SourceBus:  cfg.BusConfig.SourceBus,
+	})
+
+	ingestapp.Routes(app, ingestapp.Config{
+		Log:       cfg.Log,
+		LogBus:    cfg.BusConfig.LogBus,
+		SourceBus: cfg.BusConfig.SourceBus,
+		UsageBus:  cfg.BusConfig.UsageBus,
+		Hub:       cfg.LogHub,
 	})
 
 	contactapp.Routes(app, contactapp.Config{

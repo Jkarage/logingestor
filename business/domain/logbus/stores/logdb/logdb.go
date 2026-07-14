@@ -15,6 +15,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// logColumns is the shared SELECT column list for logs rows; it must match the
+// db tags on logDB.
+const logColumns = `id, project_id, level, message, source, ts, tags, meta,
+	source_type, source_id, host, container, pod, namespace, cluster,
+	unit, facility, region, cloud_resource_id, attributes`
+
 // Store manages the set of APIs for log database access.
 type Store struct {
 	log *logger.Logger
@@ -26,16 +32,33 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 
-// BulkInsert persists a slice of log entries, one INSERT per entry.
+// insertBatchSize bounds the rows per multi-row INSERT so the total bound
+// parameter count stays well under Postgres' 65535 limit (20 cols * 1000 rows).
+const insertBatchSize = 1000
+
+// BulkInsert persists a slice of log entries using chunked multi-row INSERTs.
+// sqlx expands a slice argument into VALUES (...),(...),... for one round trip
+// per chunk — far cheaper than the previous per-row loop on the infra path.
 func (s *Store) BulkInsert(ctx context.Context, logs []logbus.Log) error {
 	const q = `
 	INSERT INTO logs
-		(id, project_id, level, message, source, ts, tags, meta)
+		(id, project_id, level, message, source, ts, tags, meta,
+		 source_type, source_id, host, container, pod, namespace, cluster,
+		 unit, facility, region, cloud_resource_id, attributes)
 	VALUES
-		(:id, :project_id, :level, :message, :source, :ts, :tags, :meta)`
+		(:id, :project_id, :level, :message, :source, :ts, :tags, :meta,
+		 :source_type, :source_id, :host, :container, :pod, :namespace, :cluster,
+		 :unit, :facility, :region, :cloud_resource_id, :attributes)`
 
-	for _, l := range logs {
-		if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBLog(l)); err != nil {
+	for start := 0; start < len(logs); start += insertBatchSize {
+		end := min(start+insertBatchSize, len(logs))
+
+		rows := make([]logDB, 0, end-start)
+		for _, l := range logs[start:end] {
+			rows = append(rows, toDBLog(l))
+		}
+
+		if _, err := sqlx.NamedExecContext(ctx, s.db, q, rows); err != nil {
 			return fmt.Errorf("namedexeccontext: %w", err)
 		}
 	}
@@ -50,7 +73,7 @@ func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) (logbus.Log, error)
 	}{ID: id.String()}
 
 	const q = `
-	SELECT id, project_id, level, message, source, ts, tags, meta
+	SELECT ` + logColumns + `
 	FROM logs
 	WHERE id = :id`
 
@@ -74,7 +97,7 @@ func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int,
 	}
 
 	base := `
-	SELECT id, project_id, level, message, source, ts, tags, meta
+	SELECT ` + logColumns + `
 	FROM logs`
 
 	countBase := `SELECT count(1) FROM logs`
@@ -107,19 +130,24 @@ func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int,
 	return logs, count.Count, nil
 }
 
-// Stats returns a per-level count for a project.
-func (s *Store) Stats(ctx context.Context, projectID uuid.UUID) (map[string]int, error) {
-	data := struct {
-		ProjectID string `db:"project_id"`
-	}{
-		ProjectID: projectID.String(),
+// Stats returns a per-level count for a project, optionally scoped to a
+// source_type ("app" | "infra"); nil counts all source types.
+func (s *Store) Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error) {
+	data := map[string]any{
+		"project_id": projectID.String(),
 	}
 
-	const q = `
+	q := `
 	SELECT level, count(1) AS count
 	FROM logs
-	WHERE project_id = :project_id
-	GROUP BY level`
+	WHERE project_id = :project_id`
+
+	if sourceType != nil {
+		data["source_type"] = *sourceType
+		q += ` AND source_type = :source_type`
+	}
+
+	q += ` GROUP BY level`
 
 	var rows []statsRow
 	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &rows); err != nil {
@@ -152,6 +180,12 @@ func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUI
 
 	writeWhere(dataBuf, "project_id = :project_id")
 	writeWhere(countBuf, "project_id = :project_id")
+
+	if filter.SourceType != nil {
+		data["source_type"] = *filter.SourceType
+		writeWhere(dataBuf, "source_type = :source_type")
+		writeWhere(countBuf, "source_type = :source_type")
+	}
 
 	if filter.Level != nil {
 		data["level"] = filter.Level.String()

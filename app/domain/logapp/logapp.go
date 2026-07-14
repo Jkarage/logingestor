@@ -145,6 +145,12 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 
 	filter := logbus.QueryFilter{ProjectID: projectID}
 
+	if st, err := parseSourceType(q.Get("source_type")); err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	} else if st != nil {
+		filter.SourceType = st
+	}
+
 	if lvlStr := q.Get("level"); lvlStr != "" {
 		lvl, err := logbus.ParseLevel(lvlStr)
 		if err != nil {
@@ -204,6 +210,20 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	}
 }
 
+// parseSourceType validates the optional source_type query param. An empty
+// value means "all" (nil filter); "app"/"infra" scope the query.
+func parseSourceType(s string) (*string, error) {
+	switch s {
+	case "":
+		return nil, nil
+	case logbus.SourceTypeApp, logbus.SourceTypeInfra:
+		v := s
+		return &v, nil
+	default:
+		return nil, fmt.Errorf("invalid source_type %q (want app|infra)", s)
+	}
+}
+
 // stats handles GET /v1/projects/{project_id}/logs/stats.
 func (a *app) stats(ctx context.Context, r *http.Request) web.Encoder {
 	projectID, err := uuid.Parse(web.Param(r, "project_id"))
@@ -211,7 +231,12 @@ func (a *app) stats(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
-	counts, err := a.logBus.Stats(ctx, projectID)
+	st, err := parseSourceType(r.URL.Query().Get("source_type"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, err)
+	}
+
+	counts, err := a.logBus.Stats(ctx, projectID, st)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "stats: %s", err)
 	}

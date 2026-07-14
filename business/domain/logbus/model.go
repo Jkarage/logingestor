@@ -44,36 +44,65 @@ func ParseLevel(s string) (Level, error) {
 	return l, nil
 }
 
+// Source type values distinguish application logs from infrastructure logs.
+const (
+	SourceTypeApp   = "app"
+	SourceTypeInfra = "infra"
+)
+
+// Infra holds the infrastructure dimensions of a log entry. All fields are
+// optional and only populated for source_type='infra' entries.
+type Infra struct {
+	Host            string
+	Container       string
+	Pod             string
+	Namespace       string
+	Cluster         string
+	Unit            string
+	Facility        string
+	Region          string
+	CloudResourceID string
+}
+
 // Log is a single log entry.
 type Log struct {
-	ID        uuid.UUID
-	ProjectID uuid.UUID
-	Level     Level
-	Message   string
-	Source    string
-	Timestamp time.Time
-	Tags      []string
-	Meta      map[string]any
+	ID         uuid.UUID
+	ProjectID  uuid.UUID
+	Level      Level
+	Message    string
+	Source     string
+	Timestamp  time.Time
+	Tags       []string
+	Meta       map[string]any
+	SourceType string
+	SourceID   *uuid.UUID
+	Infra      Infra
+	Attributes map[string]any
 }
 
 // NewLog contains the data needed to create a log entry.
 type NewLog struct {
-	ProjectID uuid.UUID
-	Level     Level
-	Message   string
-	Source    string
-	Timestamp time.Time
-	Tags      []string
-	Meta      map[string]any
+	ProjectID  uuid.UUID
+	Level      Level
+	Message    string
+	Source     string
+	Timestamp  time.Time
+	Tags       []string
+	Meta       map[string]any
+	SourceType string
+	SourceID   *uuid.UUID
+	Infra      Infra
+	Attributes map[string]any
 }
 
 // QueryFilter holds filters for a log query.
 type QueryFilter struct {
-	ProjectID uuid.UUID
-	Level     *Level
-	Search    *string
-	From      *time.Time
-	To        *time.Time
+	ProjectID  uuid.UUID
+	Level      *Level
+	Search     *string
+	From       *time.Time
+	To         *time.Time
+	SourceType *string
 }
 
 // QueryResult holds a page of log results.

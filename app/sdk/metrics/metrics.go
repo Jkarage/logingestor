@@ -20,6 +20,11 @@ type metrics struct {
 	requests   *expvar.Int
 	errors     *expvar.Int
 	panics     *expvar.Int
+
+	ingestAccepted  *expvar.Int
+	ingestRejected  *expvar.Int
+	ingestDropped   *expvar.Int
+	ingestThrottled *expvar.Int
 }
 
 // init constructs the metrics value that will be used to capture metrics.
@@ -32,6 +37,11 @@ func init() {
 		requests:   expvar.NewInt("requests"),
 		errors:     expvar.NewInt("errors"),
 		panics:     expvar.NewInt("panics"),
+
+		ingestAccepted:  expvar.NewInt("ingest_accepted"),
+		ingestRejected:  expvar.NewInt("ingest_rejected"),
+		ingestDropped:   expvar.NewInt("ingest_dropped"),
+		ingestThrottled: expvar.NewInt("ingest_throttled"),
 	}
 }
 
@@ -84,4 +94,32 @@ func AddPanics(ctx context.Context) int64 {
 	}
 
 	return 0
+}
+
+// AddIngestAccepted adds n to the count of accepted ingested events.
+func AddIngestAccepted(ctx context.Context, n int) {
+	if v, ok := ctx.Value(key).(*metrics); ok {
+		v.ingestAccepted.Add(int64(n))
+	}
+}
+
+// AddIngestRejected adds n to the count of rejected ingest records.
+func AddIngestRejected(ctx context.Context, n int) {
+	if v, ok := ctx.Value(key).(*metrics); ok {
+		v.ingestRejected.Add(int64(n))
+	}
+}
+
+// AddIngestDropped adds n to the count of sampled-out ingest records.
+func AddIngestDropped(ctx context.Context, n int) {
+	if v, ok := ctx.Value(key).(*metrics); ok {
+		v.ingestDropped.Add(int64(n))
+	}
+}
+
+// AddIngestThrottled increments the count of rate-limited/over-quota requests.
+func AddIngestThrottled(ctx context.Context) {
+	if v, ok := ctx.Value(key).(*metrics); ok {
+		v.ingestThrottled.Add(1)
+	}
 }
