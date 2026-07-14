@@ -99,9 +99,9 @@ func (s *Store) Create(ctx context.Context, i integrationbus.Integration) error 
 
 	const q = `
 	INSERT INTO integrations
-		(id, org_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated)
+		(id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated)
 	VALUES
-		(:id, :org_id, :provider_id, :name, :credentials_enc, :credentials_iv, :enabled, :date_created, :date_updated)`
+		(:id, :org_id, :project_id, :provider_id, :name, :credentials_enc, :credentials_iv, :enabled, :date_created, :date_updated)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBIntegration(i, enc, iv)); err != nil {
 		if errors.Is(err, sqldb.ErrDBDuplicatedEntry) {
@@ -161,7 +161,7 @@ func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) (integrationbus.Int
 
 	const q = `
 	SELECT
-		id, org_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated
+		id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated
 	FROM
 		integrations
 	WHERE
@@ -191,7 +191,7 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationb
 
 	const q = `
 	SELECT
-		id, org_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated
+		id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated
 	FROM
 		integrations
 	WHERE
@@ -204,6 +204,36 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationb
 		return nil, fmt.Errorf("namedqueryslice: %w", err)
 	}
 
+	return s.decryptAll(ctx, dbs), nil
+}
+
+// QueryByProject returns all integrations owned by a project, newest-oldest.
+func (s *Store) QueryByProject(ctx context.Context, projectID uuid.UUID) ([]integrationbus.Integration, error) {
+	data := struct {
+		ProjectID string `db:"project_id"`
+	}{ProjectID: projectID.String()}
+
+	const q = `
+	SELECT
+		id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated
+	FROM
+		integrations
+	WHERE
+		project_id = :project_id
+	ORDER BY
+		date_created ASC`
+
+	var dbs []integrationDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &dbs); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	return s.decryptAll(ctx, dbs), nil
+}
+
+// decryptAll decrypts a batch of integration rows, skipping (and logging) any
+// row whose credentials fail to decrypt.
+func (s *Store) decryptAll(ctx context.Context, dbs []integrationDB) []integrationbus.Integration {
 	result := make([]integrationbus.Integration, 0, len(dbs))
 	for _, db := range dbs {
 		creds, err := s.decryptCreds(db.CredentialsEnc, db.CredentialsIV)
@@ -213,8 +243,7 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationb
 		}
 		result = append(result, toBusIntegration(db, creds))
 	}
-
-	return result, nil
+	return result
 }
 
 // =============================================================================
@@ -224,9 +253,9 @@ func (s *Store) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationb
 func (s *Store) CreateRule(ctx context.Context, r integrationbus.AlertRule) error {
 	const q = `
 	INSERT INTO alert_rules
-		(id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at)
+		(id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at)
 	VALUES
-		(:id, :org_id, :connection_id, :project_id, :name, :level, :is_active, :created_at, :updated_at)`
+		(:id, :org_id, :project_id, :connection_id, :user_id, :name, :level, :is_active, :created_at, :updated_at)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBAlertRule(r)); err != nil {
 		return fmt.Errorf("namedexeccontext: %w", err)
@@ -237,13 +266,13 @@ func (s *Store) CreateRule(ctx context.Context, r integrationbus.AlertRule) erro
 
 // UpdateRule replaces a rule's mutable fields in the database.
 func (s *Store) UpdateRule(ctx context.Context, r integrationbus.AlertRule) error {
+	// project_id and user_id (owner) are immutable, so they are not updated here.
 	const q = `
 	UPDATE alert_rules
 	SET
 		name          = :name,
 		level         = :level,
 		connection_id = :connection_id,
-		project_id    = :project_id,
 		is_active     = :is_active,
 		updated_at    = :updated_at
 	WHERE
@@ -278,7 +307,7 @@ func (s *Store) QueryRuleByID(ctx context.Context, id uuid.UUID) (integrationbus
 	}{ID: id.String()}
 
 	const q = `
-	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
 	FROM alert_rules
 	WHERE id = :id`
 
@@ -293,14 +322,40 @@ func (s *Store) QueryRuleByID(ctx context.Context, id uuid.UUID) (integrationbus
 	return toBusAlertRule(db), nil
 }
 
-// QueryRulesByOrg returns all alert rules for an org, ordered by creation date.
+// QueryRulesByProject returns all alert rules for a project, oldest-first.
+func (s *Store) QueryRulesByProject(ctx context.Context, projectID uuid.UUID) ([]integrationbus.AlertRule, error) {
+	data := struct {
+		ProjectID string `db:"project_id"`
+	}{ProjectID: projectID.String()}
+
+	const q = `
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
+	FROM alert_rules
+	WHERE project_id = :project_id
+	ORDER BY created_at ASC`
+
+	var dbs []alertRuleDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &dbs); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	rules := make([]integrationbus.AlertRule, len(dbs))
+	for i, db := range dbs {
+		rules[i] = toBusAlertRule(db)
+	}
+
+	return rules, nil
+}
+
+// QueryRulesByOrg returns all alert rules across an org's projects, oldest
+// first. Read-only aggregate for admin views; scoped strictly to the org.
 func (s *Store) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]integrationbus.AlertRule, error) {
 	data := struct {
 		OrgID string `db:"org_id"`
 	}{OrgID: orgID.String()}
 
 	const q = `
-	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
 	FROM alert_rules
 	WHERE org_id = :org_id
 	ORDER BY created_at ASC`
@@ -320,35 +375,28 @@ func (s *Store) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]integra
 
 // QueryMatchingRules returns active rules whose level is in the provided list and
 // whose project_id is NULL (org-wide) or matches the given projectID.
-func (s *Store) QueryMatchingRules(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, levels []string) ([]integrationbus.AlertRule, error) {
+func (s *Store) QueryMatchingRules(ctx context.Context, projectID uuid.UUID, levels []string) ([]integrationbus.AlertRule, error) {
 	if len(levels) == 0 {
 		return nil, nil
 	}
 
-	var projID any
-	if projectID != nil {
-		projID = projectID.String()
-	}
-
 	data := struct {
-		OrgID     string `db:"org_id"`
-		ProjectID any    `db:"project_id"`
+		ProjectID string `db:"project_id"`
 		Levels    []any  `db:"levels"`
 	}{
-		OrgID:     orgID.String(),
-		ProjectID: projID,
+		ProjectID: projectID.String(),
 	}
 	for _, l := range levels {
 		data.Levels = append(data.Levels, l)
 	}
 
+	// Rules are project-scoped: a project's logs only fire that project's rules.
 	const q = `
-	SELECT id, org_id, connection_id, project_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
 	FROM alert_rules
-	WHERE org_id = :org_id
+	WHERE project_id = :project_id
 	  AND is_active = true
-	  AND level IN (:levels)
-	  AND (project_id IS NULL OR project_id = :project_id)`
+	  AND level IN (:levels)`
 
 	var dbs []alertRuleDB
 	if err := sqldb.NamedQuerySliceUsingIn(ctx, s.log, s.db, q, data, &dbs); err != nil {

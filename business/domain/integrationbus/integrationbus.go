@@ -12,13 +12,14 @@ import (
 
 // Set of error variables for CRUD operations.
 var (
-	ErrNotFound         = errors.New("integration not found")
-	ErrDuplicateName    = errors.New("integration name already exists for this provider in org")
-	ErrUnknownProvider  = errors.New("unknown integration provider")
-	ErrProviderRejected = errors.New("provider rejected the request")
-	ErrRuleNotFound     = errors.New("alert rule not found")
-	ErrInvalidLevel     = errors.New("level must be one of DEBUG, INFO, WARN, ERROR")
-	ErrConnectionBadOrg = errors.New("connection does not belong to this org")
+	ErrNotFound             = errors.New("integration not found")
+	ErrDuplicateName        = errors.New("integration name already exists for this provider in org")
+	ErrUnknownProvider      = errors.New("unknown integration provider")
+	ErrProviderRejected     = errors.New("provider rejected the request")
+	ErrRuleNotFound         = errors.New("alert rule not found")
+	ErrInvalidLevel         = errors.New("level must be one of DEBUG, INFO, WARN, ERROR")
+	ErrConnectionBadOrg     = errors.New("connection does not belong to this org")
+	ErrConnectionBadProject = errors.New("connection does not belong to this project")
 )
 
 // Storer declares the persistence behaviour this package needs.
@@ -28,15 +29,17 @@ type Storer interface {
 	Delete(ctx context.Context, i Integration) error
 	QueryByID(ctx context.Context, id uuid.UUID) (Integration, error)
 	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Integration, error)
+	QueryByProject(ctx context.Context, projectID uuid.UUID) ([]Integration, error)
 	QueryProviders(ctx context.Context) ([]Provider, error)
 
 	CreateRule(ctx context.Context, r AlertRule) error
 	UpdateRule(ctx context.Context, r AlertRule) error
 	DeleteRule(ctx context.Context, id uuid.UUID) error
 	QueryRuleByID(ctx context.Context, id uuid.UUID) (AlertRule, error)
+	QueryRulesByProject(ctx context.Context, projectID uuid.UUID) ([]AlertRule, error)
 	QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]AlertRule, error)
 	DisableRulesByConnection(ctx context.Context, connectionID uuid.UUID) error
-	QueryMatchingRules(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, levels []string) ([]AlertRule, error)
+	QueryMatchingRules(ctx context.Context, projectID uuid.UUID, levels []string) ([]AlertRule, error)
 }
 
 // Business manages the set of APIs for the integration domain.
@@ -74,6 +77,7 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, ni NewIntegrat
 	i := Integration{
 		ID:          uuid.New(),
 		OrgID:       ni.OrgID,
+		ProjectID:   ni.ProjectID,
 		ProviderID:  ni.ProviderID,
 		Name:        ni.Name,
 		Credentials: ni.Credentials,
@@ -143,11 +147,21 @@ func (b *Business) QueryByID(ctx context.Context, id uuid.UUID) (Integration, er
 	return i, nil
 }
 
-// QueryByOrg returns all integrations configured for an org.
+// QueryByOrg returns all integrations across an org's projects. Intended for
+// read-only admin aggregate views; writes always go through a project.
 func (b *Business) QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Integration, error) {
 	integrations, err := b.storer.QueryByOrg(ctx, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("querybyorg: %w", err)
+	}
+	return integrations, nil
+}
+
+// QueryByProject returns all integration connections owned by a project.
+func (b *Business) QueryByProject(ctx context.Context, projectID uuid.UUID) ([]Integration, error) {
+	integrations, err := b.storer.QueryByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("querybyproject: %w", err)
 	}
 	return integrations, nil
 }
@@ -192,16 +206,22 @@ func (b *Business) CreateRule(ctx context.Context, nr NewAlertRule) (AlertRule, 
 		return AlertRule{}, fmt.Errorf("createrule: %w", err)
 	}
 
+	// The connection must belong to the rule's project (which implies its org).
+	if conn.ProjectID != nr.ProjectID {
+		return AlertRule{}, fmt.Errorf("createrule: %w", ErrConnectionBadProject)
+	}
 	if conn.OrgID != nr.OrgID {
 		return AlertRule{}, fmt.Errorf("createrule: %w", ErrConnectionBadOrg)
 	}
 
 	now := time.Now()
+	userID := nr.UserID
 	r := AlertRule{
 		ID:           uuid.New(),
 		OrgID:        nr.OrgID,
-		ConnectionID: nr.ConnectionID,
 		ProjectID:    nr.ProjectID,
+		ConnectionID: nr.ConnectionID,
+		UserID:       &userID,
 		Name:         nr.Name,
 		Level:        nr.Level,
 		IsActive:     nr.IsActive,
@@ -228,10 +248,18 @@ func (b *Business) UpdateRule(ctx context.Context, r AlertRule, ur UpdateAlertRu
 		r.Level = *ur.Level
 	}
 	if ur.ConnectionID != nil {
+		// A rule may only route to a connection in its own project.
+		conn, err := b.storer.QueryByID(ctx, *ur.ConnectionID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return AlertRule{}, fmt.Errorf("updaterule: %w", ErrNotFound)
+			}
+			return AlertRule{}, fmt.Errorf("updaterule: %w", err)
+		}
+		if conn.ProjectID != r.ProjectID {
+			return AlertRule{}, fmt.Errorf("updaterule: %w", ErrConnectionBadProject)
+		}
 		r.ConnectionID = *ur.ConnectionID
-	}
-	if ur.ProjectID != nil {
-		r.ProjectID = *ur.ProjectID
 	}
 	if ur.IsActive != nil {
 		r.IsActive = *ur.IsActive
@@ -262,7 +290,17 @@ func (b *Business) QueryRuleByID(ctx context.Context, id uuid.UUID) (AlertRule, 
 	return r, nil
 }
 
-// QueryRulesByOrg returns all alert rules for an org.
+// QueryRulesByProject returns all alert rules for a project (team-visible).
+func (b *Business) QueryRulesByProject(ctx context.Context, projectID uuid.UUID) ([]AlertRule, error) {
+	rules, err := b.storer.QueryRulesByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("queryrulesbyproject: %w", err)
+	}
+	return rules, nil
+}
+
+// QueryRulesByOrg returns all alert rules across an org's projects. Intended
+// for read-only admin aggregate views; writes always go through a project.
 func (b *Business) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]AlertRule, error) {
 	rules, err := b.storer.QueryRulesByOrg(ctx, orgID)
 	if err != nil {
@@ -306,15 +344,16 @@ func (b *Business) SendAlert(ctx context.Context, connectionID uuid.UUID, payloa
 	return nil
 }
 
-// FireAlerts finds all active rules matching the log event and delivers alerts.
-// projectID may be nil when the log has no associated project.
-func (b *Business) FireAlerts(ctx context.Context, orgID uuid.UUID, projectID *uuid.UUID, payload AlertPayload) error {
+// FireAlerts finds all active rules for the log's project matching its level
+// and delivers alerts. Rules are project-scoped, so a project's logs only route
+// through connections that project owns.
+func (b *Business) FireAlerts(ctx context.Context, projectID uuid.UUID, payload AlertPayload) error {
 	levels := levelThreshold(payload.Level)
 	if len(levels) == 0 {
 		return nil
 	}
 
-	rules, err := b.storer.QueryMatchingRules(ctx, orgID, projectID, levels)
+	rules, err := b.storer.QueryMatchingRules(ctx, projectID, levels)
 	if err != nil {
 		return fmt.Errorf("firealerts: querymatchingrules: %w", err)
 	}

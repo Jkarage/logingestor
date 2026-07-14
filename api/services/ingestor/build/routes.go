@@ -116,6 +116,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Auth:           cfg.AuthConfig.Auth,
 		AuthClient:     cfg.IngestorConfig.AuthClient,
 		UserBus:        cfg.BusConfig.UserBus,
+		ProjectBus:     cfg.BusConfig.ProjectBus,
 		IntegrationBus: cfg.BusConfig.IntegrationBus,
 		AuditBus:       cfg.BusConfig.AuditBus,
 	})

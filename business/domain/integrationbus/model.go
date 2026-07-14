@@ -33,10 +33,11 @@ type Provider struct {
 	Fields      []ProviderField
 }
 
-// Integration is a configured integration for a specific org.
+// Integration is a configured integration connection, owned by a project.
 type Integration struct {
 	ID          uuid.UUID
 	OrgID       uuid.UUID
+	ProjectID   uuid.UUID
 	ProviderID  string
 	Name        string
 	Credentials map[string]string // decrypted; only in memory, never persisted in plain text
@@ -48,6 +49,7 @@ type Integration struct {
 // NewIntegration contains the information needed to create a new integration.
 type NewIntegration struct {
 	OrgID       uuid.UUID
+	ProjectID   uuid.UUID
 	ProviderID  string
 	Name        string
 	Credentials map[string]string
@@ -78,12 +80,15 @@ type Caller interface {
 // =============================================================================
 // Alert Rules
 
-// AlertRule is a configured alert rule for an org.
+// AlertRule is a configured alert rule owned by a project. UserID is the
+// creator, recorded for display only — the rule is visible and editable to the
+// whole project team, not just its owner.
 type AlertRule struct {
 	ID           uuid.UUID
 	OrgID        uuid.UUID
+	ProjectID    uuid.UUID
 	ConnectionID uuid.UUID
-	ProjectID    *uuid.UUID
+	UserID       *uuid.UUID // creator/owner; nil for legacy rows
 	Name         string
 	Level        string
 	IsActive     bool
@@ -91,21 +96,23 @@ type AlertRule struct {
 	UpdatedAt    time.Time
 }
 
-// NewAlertRule contains the information needed to create a new alert rule.
+// NewAlertRule contains the information needed to create a new alert rule. The
+// rule's project is fixed by the route; the connection must live in it.
 type NewAlertRule struct {
 	OrgID        uuid.UUID
+	ProjectID    uuid.UUID
 	ConnectionID uuid.UUID
-	ProjectID    *uuid.UUID
+	UserID       uuid.UUID
 	Name         string
 	Level        string
 	IsActive     bool
 }
 
 // UpdateAlertRule contains the optional fields that can be updated on a rule.
+// ProjectID and UserID (owner) are immutable and not updatable.
 type UpdateAlertRule struct {
 	Name         *string
 	Level        *string
 	ConnectionID *uuid.UUID
-	ProjectID    **uuid.UUID // outer pointer = field present; inner pointer = nullable value
 	IsActive     *bool
 }

@@ -78,7 +78,7 @@ func (ext *Extension) dispatch(logs []logbus.Log) {
 			Timestamp:   l.Timestamp,
 		}
 
-		if err := ext.alertBus.FireAlerts(ctx, info.orgID, &l.ProjectID, payload); err != nil {
+		if err := ext.alertBus.FireAlerts(ctx, l.ProjectID, payload); err != nil {
 			ext.log.Error(ctx, "logalert: fire alerts", "logID", l.ID, "err", err)
 		}
 	}

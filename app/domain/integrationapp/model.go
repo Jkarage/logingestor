@@ -71,12 +71,13 @@ func toAppProviders(providers []integrationbus.Provider) providersResponse {
 // =============================================================================
 // Integration (per-org configured)
 
-// AppIntegration is the API representation of a configured integration.
+// AppIntegration is the API representation of a configured connection.
 // Credentials are never included in responses.
 type AppIntegration struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
 	Name      string `json:"name"`
+	ProjectID string `json:"projectId"`
 	IsActive  bool   `json:"isActive"`
 	CreatedAt string `json:"createdAt"`
 }
@@ -103,6 +104,7 @@ func toAppIntegration(bus integrationbus.Integration) AppIntegration {
 		ID:        bus.ID.String(),
 		Provider:  bus.ProviderID,
 		Name:      bus.Name,
+		ProjectID: bus.ProjectID.String(),
 		IsActive:  bus.Enabled,
 		CreatedAt: bus.DateCreated.UTC().Format(time.RFC3339),
 	}
@@ -201,16 +203,20 @@ func (t testResponse) Encode() ([]byte, string, error) {
 // =============================================================================
 // Alert Rule app models
 
-// AppAlertRule is the API representation of an alert rule.
+// AppAlertRule is the API representation of an alert rule. Rules are team-
+// visible; userId/owner* are the creator, for display only.
 type AppAlertRule struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
 	Level        string  `json:"level"`
 	ConnectionID string  `json:"connectionId"`
-	ProjectID    *string `json:"projectId"`
+	ProjectID    string  `json:"projectId"`
 	IsActive     bool    `json:"isActive"`
 	CreatedAt    string  `json:"createdAt"`
 	UpdatedAt    string  `json:"updatedAt,omitempty"`
+	UserID       *string `json:"userId"`
+	OwnerName    string  `json:"ownerName,omitempty"`
+	OwnerEmail   string  `json:"ownerEmail,omitempty"`
 }
 
 // ruleResponse wraps a single rule as { "rule": {...} }.
@@ -253,13 +259,14 @@ func toAppAlertRule(bus integrationbus.AlertRule) AppAlertRule {
 		Name:         bus.Name,
 		Level:        bus.Level,
 		ConnectionID: bus.ConnectionID.String(),
+		ProjectID:    bus.ProjectID.String(),
 		IsActive:     bus.IsActive,
 		CreatedAt:    bus.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:    bus.UpdatedAt.UTC().Format(time.RFC3339),
 	}
-	if bus.ProjectID != nil {
-		s := bus.ProjectID.String()
-		r.ProjectID = &s
+	if bus.UserID != nil {
+		s := bus.UserID.String()
+		r.UserID = &s
 	}
 	return r
 }
@@ -267,13 +274,14 @@ func toAppAlertRule(bus integrationbus.AlertRule) AppAlertRule {
 // =============================================================================
 // Request types — alert rules
 
-// NewRuleRequest is the POST body for creating an alert rule.
+// NewRuleRequest is the POST body for creating an alert rule. The rule's
+// project comes from the route and its owner from the caller — neither is
+// accepted from the client.
 type NewRuleRequest struct {
-	Name         string  `json:"name"`
-	Level        string  `json:"level"`
-	ConnectionID string  `json:"connectionId"`
-	ProjectID    *string `json:"projectId"`
-	IsActive     bool    `json:"isActive"`
+	Name         string `json:"name"`
+	Level        string `json:"level"`
+	ConnectionID string `json:"connectionId"`
+	IsActive     bool   `json:"isActive"`
 }
 
 // Decode implements web.Decoder.
@@ -281,7 +289,7 @@ func (r *NewRuleRequest) Decode(data []byte) error {
 	return json.Unmarshal(data, r)
 }
 
-func toBusNewRule(orgID uuid.UUID, req NewRuleRequest) (integrationbus.NewAlertRule, error) {
+func toBusNewRule(orgID, projectID, userID uuid.UUID, req NewRuleRequest) (integrationbus.NewAlertRule, error) {
 	var fieldErrors errs.FieldErrors
 
 	if req.Name == "" {
@@ -303,32 +311,24 @@ func toBusNewRule(orgID uuid.UUID, req NewRuleRequest) (integrationbus.NewAlertR
 		return integrationbus.NewAlertRule{}, fmt.Errorf("validate: connectionId: %w", errs.NewFieldErrors("connectionId", err))
 	}
 
-	var projID *uuid.UUID
-	if req.ProjectID != nil && *req.ProjectID != "" {
-		id, err := uuid.Parse(*req.ProjectID)
-		if err != nil {
-			return integrationbus.NewAlertRule{}, fmt.Errorf("validate: projectId: %w", errs.NewFieldErrors("projectId", err))
-		}
-		projID = &id
-	}
-
 	return integrationbus.NewAlertRule{
 		OrgID:        orgID,
+		ProjectID:    projectID,
 		ConnectionID: connID,
-		ProjectID:    projID,
+		UserID:       userID,
 		Name:         req.Name,
 		Level:        req.Level,
 		IsActive:     req.IsActive,
 	}, nil
 }
 
-// UpdateRuleRequest is the PUT body for updating a rule.
+// UpdateRuleRequest is the PUT body for updating a rule. project and owner are
+// immutable and cannot be changed here.
 type UpdateRuleRequest struct {
-	Name         *string  `json:"name"`
-	Level        *string  `json:"level"`
-	ConnectionID *string  `json:"connectionId"`
-	ProjectID    **string `json:"projectId"`
-	IsActive     *bool    `json:"isActive"`
+	Name         *string `json:"name"`
+	Level        *string `json:"level"`
+	ConnectionID *string `json:"connectionId"`
+	IsActive     *bool   `json:"isActive"`
 }
 
 // Decode implements web.Decoder.
@@ -349,19 +349,6 @@ func toBusUpdateRule(req UpdateRuleRequest) (integrationbus.UpdateAlertRule, err
 			return integrationbus.UpdateAlertRule{}, fmt.Errorf("validate: connectionId: %w", errs.NewFieldErrors("connectionId", err))
 		}
 		ur.ConnectionID = &id
-	}
-
-	if req.ProjectID != nil {
-		if *req.ProjectID == nil {
-			ur.ProjectID = new(*uuid.UUID) // points to nil UUID pointer = clear project
-		} else {
-			id, err := uuid.Parse(**req.ProjectID)
-			if err != nil {
-				return integrationbus.UpdateAlertRule{}, fmt.Errorf("validate: projectId: %w", errs.NewFieldErrors("projectId", err))
-			}
-			inner := &id
-			ur.ProjectID = &inner
-		}
 	}
 
 	return ur, nil

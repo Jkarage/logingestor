@@ -8,12 +8,15 @@ import (
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 )
 
-// alertRuleDB is the database representation of an alert rule.
+// alertRuleDB is the database representation of an alert rule. project_id is
+// scanned as a pointer to tolerate legacy (retired) org-wide rows where it is
+// NULL; new rows always carry it.
 type alertRuleDB struct {
 	ID           uuid.UUID  `db:"id"`
 	OrgID        uuid.UUID  `db:"org_id"`
-	ConnectionID uuid.UUID  `db:"connection_id"`
 	ProjectID    *uuid.UUID `db:"project_id"`
+	ConnectionID uuid.UUID  `db:"connection_id"`
+	UserID       *uuid.UUID `db:"user_id"`
 	Name         string     `db:"name"`
 	Level        string     `db:"level"`
 	IsActive     bool       `db:"is_active"`
@@ -22,11 +25,13 @@ type alertRuleDB struct {
 }
 
 func toDBAlertRule(r integrationbus.AlertRule) alertRuleDB {
+	projectID := r.ProjectID
 	return alertRuleDB{
 		ID:           r.ID,
 		OrgID:        r.OrgID,
+		ProjectID:    &projectID,
 		ConnectionID: r.ConnectionID,
-		ProjectID:    r.ProjectID,
+		UserID:       r.UserID,
 		Name:         r.Name,
 		Level:        r.Level,
 		IsActive:     r.IsActive,
@@ -36,11 +41,16 @@ func toDBAlertRule(r integrationbus.AlertRule) alertRuleDB {
 }
 
 func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
+	var projectID uuid.UUID
+	if db.ProjectID != nil {
+		projectID = *db.ProjectID
+	}
 	return integrationbus.AlertRule{
 		ID:           db.ID,
 		OrgID:        db.OrgID,
+		ProjectID:    projectID,
 		ConnectionID: db.ConnectionID,
-		ProjectID:    db.ProjectID,
+		UserID:       db.UserID,
 		Name:         db.Name,
 		Level:        db.Level,
 		IsActive:     db.IsActive,
@@ -50,16 +60,19 @@ func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
 }
 
 // integrationDB is the database representation of a configured integration.
+// project_id is scanned as a pointer to tolerate legacy org-level rows that
+// were never re-homed (see migration v1.25); API-created rows always set it.
 type integrationDB struct {
-	ID             uuid.UUID `db:"id"`
-	OrgID          uuid.UUID `db:"org_id"`
-	ProviderID     string    `db:"provider_id"`
-	Name           string    `db:"name"`
-	CredentialsEnc []byte    `db:"credentials_enc"`
-	CredentialsIV  []byte    `db:"credentials_iv"`
-	Enabled        bool      `db:"enabled"`
-	DateCreated    time.Time `db:"date_created"`
-	DateUpdated    time.Time `db:"date_updated"`
+	ID             uuid.UUID  `db:"id"`
+	OrgID          uuid.UUID  `db:"org_id"`
+	ProjectID      *uuid.UUID `db:"project_id"`
+	ProviderID     string     `db:"provider_id"`
+	Name           string     `db:"name"`
+	CredentialsEnc []byte     `db:"credentials_enc"`
+	CredentialsIV  []byte     `db:"credentials_iv"`
+	Enabled        bool       `db:"enabled"`
+	DateCreated    time.Time  `db:"date_created"`
+	DateUpdated    time.Time  `db:"date_updated"`
 }
 
 // providerDB is the database representation of an integration provider definition.
@@ -80,9 +93,11 @@ type providerFieldDB struct {
 }
 
 func toDBIntegration(bus integrationbus.Integration, enc, iv []byte) integrationDB {
+	projectID := bus.ProjectID
 	return integrationDB{
 		ID:             bus.ID,
 		OrgID:          bus.OrgID,
+		ProjectID:      &projectID,
 		ProviderID:     bus.ProviderID,
 		Name:           bus.Name,
 		CredentialsEnc: enc,
@@ -94,9 +109,14 @@ func toDBIntegration(bus integrationbus.Integration, enc, iv []byte) integration
 }
 
 func toBusIntegration(db integrationDB, creds map[string]string) integrationbus.Integration {
+	var projectID uuid.UUID
+	if db.ProjectID != nil {
+		projectID = *db.ProjectID
+	}
 	return integrationbus.Integration{
 		ID:          db.ID,
 		OrgID:       db.OrgID,
+		ProjectID:   projectID,
 		ProviderID:  db.ProviderID,
 		Name:        db.Name,
 		Credentials: creds,

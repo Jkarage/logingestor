@@ -229,21 +229,20 @@ CREATE INDEX IF NOT EXISTS integrations_org_idx ON integrations(org_id);
 -- Version: 1.16
 -- Description: Create alert_rules table
 CREATE TABLE IF NOT EXISTS alert_rules (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    org_id UUID NOT NULL,
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id        UUID NOT NULL,
     connection_id UUID NOT NULL,
-    project_id UUID,
-    name TEXT NOT NULL,
-    level TEXT NOT NULL,
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT alert_rules_org_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE,
-    CONSTRAINT alert_rules_connection_fk FOREIGN KEY (connection_id) REFERENCES integrations(id) ON DELETE CASCADE,
-    CONSTRAINT alert_rules_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE
-    SET NULL
+    project_id    UUID,
+    name          TEXT NOT NULL,
+    level         TEXT NOT NULL,
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT alert_rules_org_fk        FOREIGN KEY (org_id)        REFERENCES organizations(id) ON DELETE CASCADE,
+    CONSTRAINT alert_rules_connection_fk FOREIGN KEY (connection_id) REFERENCES integrations(id)  ON DELETE CASCADE,
+    CONSTRAINT alert_rules_project_fk    FOREIGN KEY (project_id)    REFERENCES projects(id)      ON DELETE SET NULL
 );
-CREATE INDEX IF NOT EXISTS alert_rules_org_idx ON alert_rules(org_id);
+CREATE INDEX IF NOT EXISTS alert_rules_org_idx        ON alert_rules(org_id);
 CREATE INDEX IF NOT EXISTS alert_rules_connection_idx ON alert_rules(connection_id);
 -- Version: 1.17
 -- Description: Add org_id to audit table for org-scoped audit log queries
@@ -371,3 +370,134 @@ CREATE INDEX IF NOT EXISTS ingest_usage_org_day_idx ON ingest_usage (org_id, day
 UPDATE plans SET features = features || '{"infra_retention_days":7,"infra_daily_event_quota":1000000}'::jsonb WHERE slug = 'free';
 UPDATE plans SET features = features || '{"infra_retention_days":14,"infra_daily_event_quota":50000000}'::jsonb WHERE slug = 'pro';
 UPDATE plans SET features = features || '{"infra_retention_days":-1,"infra_daily_event_quota":-1}'::jsonb WHERE slug = 'enterprise';
+-- Version: 1.24
+-- Description: Project-scope integration connections + add rule owner
+-- Connections move from org-scoped to project-scoped. project_id is nullable at
+-- the DB level ONLY to preserve legacy org connections that cannot be re-homed
+-- (see v1.25); every connection created through the API sets it.
+ALTER TABLE integrations ADD COLUMN IF NOT EXISTS project_id UUID;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'integrations_project_fk') THEN
+        ALTER TABLE integrations ADD CONSTRAINT integrations_project_fk FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+-- Uniqueness is now per-project, not per-org. Drop the old org-level constraint
+-- so a connection can be cloned into a project without colliding.
+ALTER TABLE integrations DROP CONSTRAINT IF EXISTS integrations_org_provider_name_uq;
+CREATE UNIQUE INDEX IF NOT EXISTS integrations_project_provider_name_uq ON integrations (project_id, provider_id, name);
+CREATE INDEX IF NOT EXISTS integrations_project_active_idx ON integrations (project_id, enabled);
+-- Alert rules gain a display owner (creator). Nullable for legacy rows.
+ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS user_id UUID;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'alert_rules_user_fk') THEN
+        ALTER TABLE alert_rules ADD CONSTRAINT alert_rules_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS alert_rules_project_idx ON alert_rules (project_id);
+-- Version: 1.25
+-- Description: Data migration — re-home org connections/rules to projects
+-- Deterministic, idempotent (guarded by the mapping table + ON CONFLICT), and
+-- reversible via integration_migration_map (old->new connection id per project).
+-- Strategy: rules with a project keep it (cloning their connection into that
+-- project if it is still org-level); org-wide rules (project_id IS NULL) fan out
+-- to every project in the org that already has logs. Original org connections
+-- that end up unreferenced are disabled (never dropped) so no credentials leak
+-- or vanish.
+CREATE TABLE IF NOT EXISTS integration_migration_map (
+    old_connection_id UUID NOT NULL,
+    new_connection_id UUID NOT NULL,
+    project_id        UUID NOT NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT integration_migration_map_pkey PRIMARY KEY (old_connection_id, project_id)
+);
+DO $$
+DECLARE
+    r        RECORD;
+    p        RECORD;
+    new_conn UUID;
+    src_prov TEXT;
+    src_name TEXT;
+BEGIN
+    -- Step A: rules already targeting a project. Ensure their connection is
+    -- project-scoped to that same project (clone the org connection if needed).
+    FOR r IN SELECT * FROM alert_rules WHERE project_id IS NOT NULL LOOP
+        -- Already project-scoped to the right project? Nothing to do.
+        IF EXISTS (SELECT 1 FROM integrations i WHERE i.id = r.connection_id AND i.project_id = r.project_id) THEN
+            CONTINUE;
+        END IF;
+
+        SELECT new_connection_id INTO new_conn
+        FROM integration_migration_map
+        WHERE old_connection_id = r.connection_id AND project_id = r.project_id;
+
+        IF new_conn IS NULL THEN
+            SELECT provider_id, name INTO src_prov, src_name FROM integrations WHERE id = r.connection_id;
+            IF src_prov IS NULL THEN
+                CONTINUE; -- dangling connection reference; leave rule as-is
+            END IF;
+
+            new_conn := gen_random_uuid();
+            INSERT INTO integrations (id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated)
+            SELECT new_conn, i.org_id, r.project_id, i.provider_id, i.name, i.credentials_enc, i.credentials_iv, i.enabled, NOW(), NOW()
+            FROM integrations i WHERE i.id = r.connection_id
+            ON CONFLICT (project_id, provider_id, name) DO NOTHING;
+
+            IF NOT FOUND THEN
+                SELECT id INTO new_conn FROM integrations
+                WHERE project_id = r.project_id AND provider_id = src_prov AND name = src_name;
+            END IF;
+
+            INSERT INTO integration_migration_map (old_connection_id, new_connection_id, project_id)
+            VALUES (r.connection_id, new_conn, r.project_id)
+            ON CONFLICT DO NOTHING;
+        END IF;
+
+        UPDATE alert_rules SET connection_id = new_conn WHERE id = r.id;
+    END LOOP;
+
+    -- Step B: org-wide rules (project_id IS NULL) fan out to projects with logs.
+    FOR r IN SELECT * FROM alert_rules WHERE project_id IS NULL LOOP
+        SELECT provider_id, name INTO src_prov, src_name FROM integrations WHERE id = r.connection_id;
+
+        FOR p IN
+            SELECT pr.id AS project_id FROM projects pr
+            WHERE pr.org_id = r.org_id
+              AND EXISTS (SELECT 1 FROM logs l WHERE l.project_id = pr.id)
+        LOOP
+            SELECT new_connection_id INTO new_conn
+            FROM integration_migration_map
+            WHERE old_connection_id = r.connection_id AND project_id = p.project_id;
+
+            IF new_conn IS NULL AND src_prov IS NOT NULL THEN
+                new_conn := gen_random_uuid();
+                INSERT INTO integrations (id, org_id, project_id, provider_id, name, credentials_enc, credentials_iv, enabled, date_created, date_updated)
+                SELECT new_conn, i.org_id, p.project_id, i.provider_id, i.name, i.credentials_enc, i.credentials_iv, i.enabled, NOW(), NOW()
+                FROM integrations i WHERE i.id = r.connection_id
+                ON CONFLICT (project_id, provider_id, name) DO NOTHING;
+
+                IF NOT FOUND THEN
+                    SELECT id INTO new_conn FROM integrations
+                    WHERE project_id = p.project_id AND provider_id = src_prov AND name = src_name;
+                END IF;
+
+                INSERT INTO integration_migration_map (old_connection_id, new_connection_id, project_id)
+                VALUES (r.connection_id, new_conn, p.project_id)
+                ON CONFLICT DO NOTHING;
+            END IF;
+
+            IF new_conn IS NOT NULL THEN
+                INSERT INTO alert_rules (id, org_id, connection_id, project_id, user_id, name, level, is_active, created_at, updated_at)
+                VALUES (gen_random_uuid(), r.org_id, new_conn, p.project_id, r.user_id, r.name, r.level, r.is_active, NOW(), NOW());
+            END IF;
+        END LOOP;
+
+        -- Retire the original org-wide rule (kept for reversibility, deactivated).
+        UPDATE alert_rules SET is_active = FALSE WHERE id = r.id;
+        RAISE NOTICE 'v1.25: fanned out org-wide rule % (org %) to projects with logs', r.id, r.org_id;
+    END LOOP;
+
+    -- Step C: disable org connections left unreferenced (creds preserved, flagged).
+    UPDATE integrations SET enabled = FALSE
+    WHERE project_id IS NULL
+      AND id NOT IN (SELECT connection_id FROM alert_rules);
+END $$;
