@@ -15,6 +15,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
+	"github.com/jkarage/logingestor/business/types/role"
 	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -60,13 +61,18 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
+	// This route is unauthenticated self-registration: the caller must never
+	// choose their own roles, or anyone could sign up as SUPER ADMIN. Elevated
+	// roles are granted later by an admin through the role-update flow.
+	nc.Roles = []role.Role{role.User}
+
 	// Create user — enabled=false inside userbus.Create
 	usr, err := a.userBus.Create(ctx, mid.GetSubjectID(ctx), nc)
 	if err != nil {
 		if errors.Is(err, userbus.ErrUniqueEmail) {
 			return errs.New(errs.Aborted, userbus.ErrUniqueEmail)
 		}
-		return errs.Errorf(errs.Internal, "create: usr[%+v]: %s", usr, err)
+		return errs.Errorf(errs.Internal, "create: %s", err)
 	}
 
 	// Invite path: activate immediately, no email confirmation needed.

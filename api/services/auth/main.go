@@ -83,8 +83,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Password     string `conf:"default:postgres,env:DB_PASSWORD,mask"`
 			Host         string `conf:"default:12.13.14.15:5432,env:DB_HOST"`
 			Name         string `conf:"default:bsa,env:DB_NAME"`
-			MaxIdleConns int    `conf:"default:0"`
-			MaxOpenConns int    `conf:"default:0"`
+			MaxIdleConns int    `conf:"default:25"`
+			MaxOpenConns int    `conf:"default:25"`
 			DisableTLS   bool   `conf:"default:true"`
 		}
 		Tempo struct {

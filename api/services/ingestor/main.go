@@ -113,8 +113,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Password        string        `conf:"default:postgres,env:DB_PASSWORD,mask"`
 			Host            string        `conf:"default:12.13.14.15:5432,env:DB_HOST"`
 			Name            string        `conf:"default:bsa,env:DB_NAME"`
-			MaxIdleConns    int           `conf:"default:0"`
-			MaxOpenConns    int           `conf:"default:0"`
+			MaxIdleConns    int           `conf:"default:25"`
+			MaxOpenConns    int           `conf:"default:25"`
 			DisableTLS      bool          `conf:"default:true"`
 			ConnMaxLifetime time.Duration `conf:"default:2m"`
 			ConnMaxIdleTime time.Duration `conf:"default:1m"`
@@ -126,7 +126,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			Issuer     string `conf:"default:confirm mail"`
 		}
 		Resend struct {
-			APIKey       string `conf:"default:xxxxxxxxxxxxxxxxxxxxx"`
+			APIKey       string `conf:"default:xxxxxxxxxxxxxxxxxxxxx,env:RESEND_API_KEY,mask"`
 			From         string `conf:"default:info@streamlogia.com"`
 			FromName     string `conf:"default:Info"`
 			EmailBaseURL string `conf:"default:https://streamlogia.com"`

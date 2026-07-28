@@ -321,6 +321,22 @@ func levelThreshold(logLevel string) []string {
 	return nil
 }
 
+// severityRank orders log levels; higher is more severe. Unknown levels rank
+// below DEBUG so they never satisfy a rule.
+func severityRank(level string) int {
+	switch level {
+	case "DEBUG":
+		return 0
+	case "INFO":
+		return 1
+	case "WARN":
+		return 2
+	case "ERROR":
+		return 3
+	}
+	return -1
+}
+
 // SendAlert decrypts credentials for connectionID and delivers payload to the provider.
 func (b *Business) SendAlert(ctx context.Context, connectionID uuid.UUID, payload AlertPayload) error {
 	integration, err := b.storer.QueryByID(ctx, connectionID)
@@ -344,11 +360,26 @@ func (b *Business) SendAlert(ctx context.Context, connectionID uuid.UUID, payloa
 	return nil
 }
 
-// FireAlerts finds all active rules for the log's project matching its level
-// and delivers alerts. Rules are project-scoped, so a project's logs only route
-// through connections that project owns.
-func (b *Business) FireAlerts(ctx context.Context, projectID uuid.UUID, payload AlertPayload) error {
-	levels := levelThreshold(payload.Level)
+// FireAlerts finds all active rules for the project matching any level present
+// in the batch and delivers one alert per rule, using the most severe matching
+// log as the representative (annotated with how many others matched). Rules are
+// project-scoped, so a project's logs only route through connections that
+// project owns. Querying rules once per batch — rather than per log — keeps a
+// 10k-record ingest from turning into 10k rule queries and 10k provider calls.
+func (b *Business) FireAlerts(ctx context.Context, projectID uuid.UUID, payloads []AlertPayload) error {
+	if len(payloads) == 0 {
+		return nil
+	}
+
+	// The union of rule levels that can fire across the batch is the threshold
+	// of the most severe payload present.
+	top := payloads[0]
+	for _, p := range payloads[1:] {
+		if severityRank(p.Level) > severityRank(top.Level) {
+			top = p
+		}
+	}
+	levels := levelThreshold(top.Level)
 	if len(levels) == 0 {
 		return nil
 	}
@@ -359,6 +390,29 @@ func (b *Business) FireAlerts(ctx context.Context, projectID uuid.UUID, payload 
 	}
 
 	for _, rule := range rules {
+		ruleRank := severityRank(rule.Level)
+
+		var rep *AlertPayload
+		matched := 0
+		for i := range payloads {
+			p := &payloads[i]
+			if r := severityRank(p.Level); r < ruleRank || r < 0 {
+				continue
+			}
+			matched++
+			if rep == nil || severityRank(p.Level) > severityRank(rep.Level) {
+				rep = p
+			}
+		}
+		if rep == nil {
+			continue
+		}
+
+		payload := *rep
+		if matched > 1 {
+			payload.Message = fmt.Sprintf("%s (+%d more matching logs in this batch)", payload.Message, matched-1)
+		}
+
 		if err := b.SendAlert(ctx, rule.ConnectionID, payload); err != nil {
 			b.log.Error(ctx, "firealerts: send alert", "ruleID", rule.ID, "connectionID", rule.ConnectionID, "err", err)
 		}

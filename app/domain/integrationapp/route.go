@@ -8,6 +8,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/foundation/logger"
@@ -20,6 +21,7 @@ type Config struct {
 	Auth           *auth.Auth
 	AuthClient     authclient.Authenticator
 	UserBus        userbus.ExtBusiness
+	OrgBus         orgbus.ExtBusiness
 	ProjectBus     projectbus.ExtBusiness
 	IntegrationBus *integrationbus.Business
 	AuditBus       auditbus.ExtBusiness
@@ -31,11 +33,13 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
+	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
 
 	// Read: any member with access to the project. Manage: project managers of
-	// that project, org admins, and super admins (viewers are read-only).
-	projRead := mid.AuthorizeProjectAccess(cfg.ProjectBus)
-	projManage := mid.AuthorizeProjectManage(cfg.ProjectBus)
+	// that project, org admins of the project's org, and super admins (viewers
+	// are read-only).
+	projRead := mid.AuthorizeProjectAccess(cfg.ProjectBus, cfg.OrgBus)
+	projManage := mid.AuthorizeProjectManage(cfg.ProjectBus, cfg.OrgBus)
 
 	a := newApp(cfg.IntegrationBus, cfg.ProjectBus, cfg.UserBus, cfg.AuditBus)
 
@@ -44,8 +48,8 @@ func Routes(app *web.App, cfg Config) {
 
 	// Read-only org aggregates across projects (admin view, org-admin only).
 	// Writes stay on the project-scoped routes below.
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/integrations", a.orgAggregate, authen, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRulesByOrg, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/integrations", a.orgAggregate, authen, ruleOrgAdmin, orgMember)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRulesByOrg, authen, ruleOrgAdmin, orgMember)
 
 	// Project-scoped connection CRUD.
 	base := "/orgs/{org_id}/projects/{project_id}/integrations"

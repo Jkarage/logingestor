@@ -36,7 +36,11 @@ func Errors(log *logger.Logger) web.MidFunc {
 				"source_err_file", path.Base(appErr.FileName),
 				"source_err_func", path.Base(appErr.FuncName))
 
-			if appErr.Code == errs.InternalOnlyLog {
+			// Never return internal error detail to the client: the wrapped
+			// error is typically a driver/pgx error whose text can expose
+			// table/column names, constraints, or interpolated struct fields.
+			// The full detail is preserved in the log line above.
+			if appErr.Code == errs.Internal || appErr.Code == errs.InternalOnlyLog {
 				appErr = errs.Errorf(errs.Internal, "Internal Server Error")
 			}
 

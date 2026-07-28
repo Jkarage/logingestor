@@ -63,6 +63,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Auth:       cfg.AuthConfig.Auth,
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		UserBus:    cfg.BusConfig.UserBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
 		ProjectBus: cfg.BusConfig.ProjectBus,
 	})
 
@@ -83,6 +84,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Log:            cfg.Log,
 		AuthClient:     cfg.IngestorConfig.AuthClient,
 		LogBus:         cfg.BusConfig.LogBus,
+		OrgBus:         cfg.BusConfig.OrgBus,
 		ProjectBus:     cfg.BusConfig.ProjectBus,
 		AnalyzeBus:     cfg.BusConfig.AnalyzeBus,
 		Hub:            cfg.LogHub,
@@ -94,6 +96,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Auth:       cfg.AuthConfig.Auth,
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		UserBus:    cfg.BusConfig.UserBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
 		ProjectBus: cfg.BusConfig.ProjectBus,
 		SourceBus:  cfg.BusConfig.SourceBus,
 	})
@@ -116,6 +119,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Auth:           cfg.AuthConfig.Auth,
 		AuthClient:     cfg.IngestorConfig.AuthClient,
 		UserBus:        cfg.BusConfig.UserBus,
+		OrgBus:         cfg.BusConfig.OrgBus,
 		ProjectBus:     cfg.BusConfig.ProjectBus,
 		IntegrationBus: cfg.BusConfig.IntegrationBus,
 		AuditBus:       cfg.BusConfig.AuditBus,

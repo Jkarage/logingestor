@@ -83,7 +83,7 @@ func (p *Jira) Send(ctx context.Context, creds map[string]string, payload integr
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(email+":"+token)))
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("jira: do: %w", err)
 	}

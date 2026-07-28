@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/foundation/logger"
@@ -18,6 +19,7 @@ type Config struct {
 	Auth       *auth.Auth
 	AuthClient authclient.Authenticator
 	UserBus    userbus.ExtBusiness
+	OrgBus     orgbus.ExtBusiness
 	ProjectBus projectbus.ExtBusiness
 }
 
@@ -27,11 +29,12 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
+	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
 
 	api := newApp(cfg.ProjectBus)
 
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/projects", api.query, authen)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/projects", api.create, authen, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}/projects/{project_id}", api.update, authen, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/projects/{project_id}", api.delete, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/projects", api.query, authen, orgMember)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/projects", api.create, authen, ruleOrgAdmin, orgMember)
+	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}/projects/{project_id}", api.update, authen, ruleOrgAdmin, orgMember)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/projects/{project_id}", api.delete, authen, ruleOrgAdmin, orgMember)
 }

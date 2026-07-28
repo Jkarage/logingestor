@@ -72,7 +72,7 @@ rule_super_admin_or_subject if {
 	count(input_admin) > 0
 } else if {
 	claim_roles := {role | some role in input.Roles}
-	input_user := {role_super_admin} & claim_roles
+	input_user := role_all & claim_roles
 	count(input_user) > 0
 	input.UserID == input.Subject
 }

@@ -9,12 +9,15 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/errs"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
-// fakeProjectBus embeds the interface; only HasAccess is exercised.
+var testOrgID = uuid.New()
+
+// fakeProjectBus embeds the interface; only HasAccess and QueryByID are exercised.
 type fakeProjectBus struct {
 	projectbus.ExtBusiness
 	access bool
@@ -24,15 +27,32 @@ func (f fakeProjectBus) HasAccess(context.Context, uuid.UUID, uuid.UUID) (bool, 
 	return f.access, nil
 }
 
+func (f fakeProjectBus) QueryByID(_ context.Context, projectID uuid.UUID) (projectbus.Project, error) {
+	return projectbus.Project{ID: projectID, OrgID: testOrgID}, nil
+}
+
+// fakeOrgBus embeds the interface; only QueryByUserID is exercised.
+type fakeOrgBus struct {
+	orgbus.ExtBusiness
+	member bool
+}
+
+func (f fakeOrgBus) QueryByUserID(context.Context, uuid.UUID) ([]orgbus.UserOrg, error) {
+	if !f.member {
+		return nil, nil
+	}
+	return []orgbus.UserOrg{{Org: orgbus.Org{ID: testOrgID}}}, nil
+}
+
 // allowed is a sentinel next-handler return so tests can tell pass from block.
 type allowed struct{}
 
 func (allowed) Encode() ([]byte, string, error) { return []byte("ok"), "text/plain", nil }
 
-func runManage(t *testing.T, roles []string, access bool) web.Encoder {
+func runManage(t *testing.T, roles []string, access bool, orgMember bool) web.Encoder {
 	t.Helper()
 
-	mw := AuthorizeProjectManage(fakeProjectBus{access: access})
+	mw := AuthorizeProjectManage(fakeProjectBus{access: access}, fakeOrgBus{member: orgMember})
 	h := mw(func(ctx context.Context, r *http.Request) web.Encoder { return allowed{} })
 
 	r := httptest.NewRequest("POST", "/x", nil)
@@ -51,21 +71,23 @@ func isAllowed(resp web.Encoder) bool {
 
 func Test_AuthorizeProjectManage(t *testing.T) {
 	cases := []struct {
-		name   string
-		roles  []string
-		access bool
-		want   bool
+		name      string
+		roles     []string
+		access    bool
+		orgMember bool
+		want      bool
 	}{
-		{"super admin", []string{role.Admin.String()}, false, true},
-		{"org admin", []string{role.OrgAdmin.String()}, false, true},
-		{"project manager with access", []string{role.PrjManager.String()}, true, true},
-		{"project manager without access", []string{role.PrjManager.String()}, false, false},
-		{"viewer with access", []string{role.User.String()}, true, false},
+		{"super admin", []string{role.Admin.String()}, false, false, true},
+		{"org admin in project's org", []string{role.OrgAdmin.String()}, false, true, true},
+		{"org admin of another org", []string{role.OrgAdmin.String()}, false, false, false},
+		{"project manager with access", []string{role.PrjManager.String()}, true, false, true},
+		{"project manager without access", []string{role.PrjManager.String()}, false, false, false},
+		{"viewer with access", []string{role.User.String()}, true, false, false},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resp := runManage(t, c.roles, c.access)
+			resp := runManage(t, c.roles, c.access, c.orgMember)
 			if got := isAllowed(resp); got != c.want {
 				t.Fatalf("allowed=%v, want %v (resp %T)", got, c.want, resp)
 			}

@@ -5,9 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -133,20 +131,21 @@ func ExecContext(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, qu
 // NamedExecContext is a helper function to execute a CUD operation with
 // logging and tracing where field replacement is necessary.
 func NamedExecContext(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any) (err error) {
-	q := queryString(query, data)
-
+	// Log and trace only the un-interpolated query text: substituting real
+	// parameter values would leak password hashes, tokens, and key hashes
+	// into logs and the tracing backend.
 	defer func() {
 		if err != nil {
 			switch data.(type) {
 			case struct{}:
-				log.Infoc(ctx, 6, "database.NamedExecContext", "query", q, "ERROR", err)
+				log.Infoc(ctx, 6, "database.NamedExecContext", "query", query, "ERROR", err)
 			default:
-				log.Infoc(ctx, 5, "database.NamedExecContext", "query", q, "ERROR", err)
+				log.Infoc(ctx, 5, "database.NamedExecContext", "query", query, "ERROR", err)
 			}
 		}
 	}()
 
-	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.exec", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.exec", attribute.String("query", query))
 	defer span.End()
 
 	if _, err := sqlx.NamedExecContext(ctx, db, query, data); err != nil {
@@ -186,15 +185,13 @@ func NamedQuerySliceUsingIn[T any](ctx context.Context, log *logger.Logger, db s
 }
 
 func namedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest *[]T, withIn bool) (err error) {
-	q := queryString(query, data)
-
 	defer func() {
 		if err != nil {
-			log.Infoc(ctx, 6, "database.NamedQuerySlice", "query", q, "ERROR", err)
+			log.Infoc(ctx, 6, "database.NamedQuerySlice", "query", query, "ERROR", err)
 		}
 	}()
 
-	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.queryslice", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.queryslice", attribute.String("query", query))
 	defer span.End()
 
 	var rows *sqlx.Rows
@@ -262,15 +259,13 @@ func NamedQueryStructUsingIn(ctx context.Context, log *logger.Logger, db sqlx.Ex
 }
 
 func namedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any, withIn bool) (err error) {
-	q := queryString(query, data)
-
 	defer func() {
 		if err != nil {
-			log.Infoc(ctx, 6, "database.NamedQuerySlice", "query", q, "ERROR", err)
+			log.Infoc(ctx, 6, "database.NamedQueryStruct", "query", query, "ERROR", err)
 		}
 	}()
 
-	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.query", attribute.String("query", q))
+	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.query", attribute.String("query", query))
 	defer span.End()
 
 	var rows *sqlx.Rows
@@ -314,30 +309,4 @@ func namedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContex
 	}
 
 	return nil
-}
-
-// queryString provides a pretty print version of the query and parameters.
-func queryString(query string, args any) string {
-	query, params, err := sqlx.Named(query, args)
-	if err != nil {
-		return err.Error()
-	}
-
-	for _, param := range params {
-		var value string
-		switch v := param.(type) {
-		case string:
-			value = fmt.Sprintf("'%s'", v)
-		case []byte:
-			value = fmt.Sprintf("'%s'", string(v))
-		default:
-			value = fmt.Sprintf("%v", v)
-		}
-		query = strings.Replace(query, "?", value, 1)
-	}
-
-	query = strings.ReplaceAll(query, "\t", "")
-	query = strings.ReplaceAll(query, "\n", " ")
-
-	return strings.Trim(query, " ")
 }

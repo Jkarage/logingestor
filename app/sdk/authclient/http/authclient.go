@@ -132,7 +132,6 @@ func (cln *Client) do(ctx context.Context, method string, endpoint string, heade
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	for key, value := range headers {
-		cln.log.Info(ctx, "authclient: rawRequest", "key", key, "value", value)
 		req.Header.Set(key, value)
 	}
 

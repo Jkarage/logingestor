@@ -53,6 +53,19 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 	return toAppProject(project)
 }
 
+// requireProjectInOrg verifies that project belongs to the org named in the
+// route's {org_id} param. Returns a non-nil error response on mismatch.
+func requireProjectInOrg(r *http.Request, project projectbus.Project) web.Encoder {
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+	if project.OrgID != orgID {
+		return errs.New(errs.NotFound, projectbus.ErrNotFound)
+	}
+	return nil
+}
+
 func (a *app) update(ctx context.Context, r *http.Request) web.Encoder {
 	var up UpdateProject
 	if err := web.Decode(r, &up); err != nil {
@@ -77,6 +90,12 @@ func (a *app) update(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "querybyid: projectID[%s]: %s", projectID, err)
 	}
 
+	// The route authorizes the caller against {org_id}; the project must
+	// actually belong to that org or the check is meaningless.
+	if resp := requireProjectInOrg(r, project); resp != nil {
+		return resp
+	}
+
 	updated, err := a.projectBus.Update(ctx, mid.GetSubjectID(ctx), project, busUpdate)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "update: projectID[%s]: %s", projectID, err)
@@ -97,6 +116,10 @@ func (a *app) delete(ctx context.Context, r *http.Request) web.Encoder {
 			return errs.New(errs.NotFound, err)
 		}
 		return errs.Errorf(errs.Internal, "querybyid: projectID[%s]: %s", projectID, err)
+	}
+
+	if resp := requireProjectInOrg(r, project); resp != nil {
+		return resp
 	}
 
 	if err := a.projectBus.Delete(ctx, mid.GetSubjectID(ctx), project); err != nil {

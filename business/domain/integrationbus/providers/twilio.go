@@ -59,7 +59,7 @@ func (p *Twilio) Send(ctx context.Context, creds map[string]string, payload inte
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(accountSid, authToken)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("twilio: do: %w", err)
 	}

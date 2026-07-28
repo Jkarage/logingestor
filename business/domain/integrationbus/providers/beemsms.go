@@ -72,7 +72,7 @@ func (p *BeemSMS) Send(ctx context.Context, creds map[string]string, payload int
 	req.Header.Set("Content-Type", "application/json")
 	req.SetBasicAuth(apiKey, secretKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("beemsms: do: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -17,6 +18,7 @@ type Config struct {
 	Log            *logger.Logger
 	AuthClient     authclient.Authenticator
 	LogBus         logbus.ExtBusiness
+	OrgBus         orgbus.ExtBusiness
 	ProjectBus     projectbus.ExtBusiness
 	AnalyzeBus     *analyzebus.Business
 	Hub            *Hub
@@ -28,13 +30,14 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
+	projRead := mid.AuthorizeProjectAccess(cfg.ProjectBus, cfg.OrgBus)
 
 	a := newApp(cfg.Log, cfg.LogBus, cfg.ProjectBus, cfg.AnalyzeBus, cfg.Hub, cfg.AuthClient, cfg.AllowedOrigins)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
-	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen)
-	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stats", a.stats, authen)
-	app.HandlerFunc(http.MethodPost, version, "/projects/{project_id}/logs/{log_id}/analyze", a.analyze, authen)
+	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen, projRead)
+	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stats", a.stats, authen, projRead)
+	app.HandlerFunc(http.MethodPost, version, "/projects/{project_id}/logs/{log_id}/analyze", a.analyze, authen, projRead)
 
 	// The stream endpoint upgrades to WebSocket. It MUST bypass the app-level
 	// middleware stack (logging, error handling) because those middleware

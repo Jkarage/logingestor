@@ -137,7 +137,10 @@ func (a *Auth) Authenticate(ctx context.Context, bearerToken string) (Claims, er
 	}
 
 	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input, ErrInvalidAuthOPA); err != nil {
-		a.log.Info(ctx, "**Authenticate-FAILED**", "token", jwtUnverified, "userID", claims.Subject)
+		// Never log the token itself: a token that fails policy for a
+		// transient reason (key rotation, clock skew) is still a live
+		// credential elsewhere.
+		a.log.Info(ctx, "**Authenticate-FAILED**", "kid", kid, "userID", claims.Subject, "err", err)
 		return Claims{}, fmt.Errorf("authentication failed: %w", err)
 	}
 
@@ -343,7 +346,7 @@ func (a *Auth) ParseVerifyToken(ctx context.Context, tokenStr string) (Claims, e
 	}
 
 	if err := a.opaPolicyEvaluation(ctx, regoAuthentication, RuleAuthenticate, input, ErrInvalidAuthOPA); err != nil {
-		a.log.Info(ctx, "**Authenticate-FAILED**", "token", tokenStr, "userID", claims.Subject)
+		a.log.Info(ctx, "**Authenticate-FAILED**", "kid", kid, "userID", claims.Subject, "err", err)
 		return Claims{}, fmt.Errorf("authentication failed: %w", err)
 	}
 

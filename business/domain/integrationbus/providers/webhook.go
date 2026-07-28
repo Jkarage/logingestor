@@ -54,7 +54,7 @@ func (p *Webhook) Send(ctx context.Context, creds map[string]string, payload int
 		req.Header.Set("X-LoginGestor-Signature", "sha256="+hex.EncodeToString(mac.Sum(nil)))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("webhook: do: %w", err)
 	}
