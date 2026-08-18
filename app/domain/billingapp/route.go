@@ -3,7 +3,6 @@ package billingapp
 import (
 	"net/http"
 
-	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
@@ -28,8 +27,7 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
-	ruleOrgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
 	a := newApp(cfg)
 
@@ -39,9 +37,12 @@ func Routes(app *web.App, cfg Config) {
 	// Stripe webhook — no JWT auth, verified by Stripe-Signature header
 	app.HandlerFunc(http.MethodPost, version, "/billing/webhook", a.webhook)
 
-	// Org-scoped billing endpoints — org_admin only
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/billing", a.getBilling, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/checkout", a.checkout, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/portal", a.portal, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/cancel", a.cancel, authen, ruleOrgMember, ruleOrgAdmin)
+	// Org-scoped billing endpoints — org admin of THIS org, resolved from the
+	// caller's org_members role rather than the JWT's global role claim. Swap
+	// orgAdmin for mid.AuthorizeOrgOwner(cfg.OrgBus) to make billing
+	// owner-only.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/billing", a.getBilling, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/checkout", a.checkout, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/portal", a.portal, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/billing/cancel", a.cancel, authen, orgAdmin)
 }

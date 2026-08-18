@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/auth"
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/logger"
@@ -21,6 +22,7 @@ type Config struct {
 	Auth         *auth.Auth
 	AuthClient   authclient.Authenticator
 	UserBus      userbus.ExtBusiness
+	OrgBus       orgbus.ExtBusiness
 }
 
 // Routes adds specific routes for this group.
@@ -32,7 +34,7 @@ func Routes(app *web.App, cfg Config) {
 	ruleAuthorizeUser := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
 	ruleAuthorizeAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOnly)
 
-	api := newApp(cfg.EmailBaseURL, cfg.SigningKey, cfg.Mailer, cfg.UserBus, cfg.Auth)
+	api := newApp(cfg.EmailBaseURL, cfg.SigningKey, cfg.Mailer, cfg.UserBus, cfg.OrgBus, cfg.Auth)
 
 	app.HandlerFunc(http.MethodGet, version, "/users", api.query, authen, ruleAuthorizeAdmin)
 	app.HandlerFunc(http.MethodGet, version, "/users/me", api.queryMe, authen)

@@ -34,7 +34,9 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
+	// Org admin is resolved from the caller's org_members row for {org_id}, not
+	// from the JWT's global role claim, so an invited ORG ADMIN qualifies.
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
 	api := newApp(
 		cfg.InvitationBus,
@@ -48,9 +50,9 @@ func Routes(app *web.App, cfg Config) {
 	)
 
 	// Org-scoped invitation management (requires ORG ADMIN).
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/invitations", api.query, authen, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/invitations", api.create, authen, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/invitations/{invitation_id}", api.revoke, authen, ruleOrgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/invitations", api.query, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/invitations", api.create, authen, orgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/invitations/{invitation_id}", api.revoke, authen, orgAdmin)
 
 	// Accept is public — the token IS the credential.
 	app.HandlerFunc(http.MethodPost, version, "/invitations/accept", api.accept)

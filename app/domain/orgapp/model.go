@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/types/name"
@@ -17,6 +18,7 @@ type Org struct {
 	Name        string `json:"name"`
 	Slug        string `json:"slug"`
 	Enabled     bool   `json:"enabled"`
+	CreatedBy   string `json:"createdBy,omitempty"`
 	DateCreated string `json:"dateCreated"`
 	DateUpdated string `json:"dateUpdated"`
 }
@@ -28,11 +30,17 @@ func (app Org) Encode() ([]byte, string, error) {
 }
 
 func toAppOrg(bus orgbus.Org) Org {
+	var createdBy string
+	if bus.CreatedBy != nil {
+		createdBy = bus.CreatedBy.String()
+	}
+
 	return Org{
 		ID:          bus.ID.String(),
 		Name:        bus.Name.String(),
 		Slug:        bus.Slug,
 		Enabled:     bus.Enabled,
+		CreatedBy:   createdBy,
 		DateCreated: bus.DateCreated.Format(time.RFC3339),
 		DateUpdated: bus.DateUpdated.Format(time.RFC3339),
 	}
@@ -101,6 +109,7 @@ type UserOrg struct {
 	Slug        string `json:"slug"`
 	Enabled     bool   `json:"enabled"`
 	Role        string `json:"role"`
+	IsOwner     bool   `json:"isOwner"`
 	DateCreated string `json:"dateCreated"`
 	DateUpdated string `json:"dateUpdated"`
 }
@@ -111,13 +120,14 @@ func (app UserOrg) Encode() ([]byte, string, error) {
 	return data, "application/json", err
 }
 
-func toAppUserOrg(bus orgbus.UserOrg) UserOrg {
+func toAppUserOrg(bus orgbus.UserOrg, callerID uuid.UUID) UserOrg {
 	return UserOrg{
 		ID:          bus.ID.String(),
 		Name:        bus.Name.String(),
 		Slug:        bus.Slug,
 		Enabled:     bus.Enabled,
 		Role:        bus.Role.String(),
+		IsOwner:     bus.CreatedBy != nil && *bus.CreatedBy == callerID,
 		DateCreated: bus.DateCreated.Format(time.RFC3339),
 		DateUpdated: bus.DateUpdated.Format(time.RFC3339),
 	}
@@ -132,10 +142,10 @@ func (app UserOrgs) Encode() ([]byte, string, error) {
 	return data, "application/json", err
 }
 
-func toAppUserOrgs(orgs []orgbus.UserOrg) UserOrgs {
+func toAppUserOrgs(orgs []orgbus.UserOrg, callerID uuid.UUID) UserOrgs {
 	app := make(UserOrgs, len(orgs))
 	for i, o := range orgs {
-		app[i] = toAppUserOrg(o)
+		app[i] = toAppUserOrg(o, callerID)
 	}
 	return app
 }
@@ -229,8 +239,13 @@ func toBusUpdateOrgRole(app UpdateOrgRole) (orgbus.UpdateOrgMember, error) {
 	var fieldErrors errs.FieldErrors
 
 	r, err := role.Parse(app.Role)
-	if err != nil {
+	switch {
+	case err != nil:
 		fieldErrors.Add("role", err)
+	case r == role.Admin:
+		// SUPER ADMIN is a platform role, never a membership role — an org
+		// admin must not be able to grant it.
+		fieldErrors.Add("role", fmt.Errorf("must be one of: ORG ADMIN, PROJECT MANAGER, VIEWER"))
 	}
 
 	if len(fieldErrors) > 0 {

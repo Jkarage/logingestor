@@ -15,6 +15,7 @@ type Org struct {
 	Name        name.Name
 	Slug        string
 	Enabled     bool
+	CreatedBy   *uuid.UUID // creator/owner; nil for legacy orgs predating ownership
 	DateCreated time.Time
 	DateUpdated time.Time
 }

@@ -137,6 +137,11 @@ func (ext *Extension) QueryBySlug(ctx context.Context, slug string) (orgbus.Org,
 	return ext.bus.QueryBySlug(ctx, slug)
 }
 
+// CountOwned does not apply auditing.
+func (ext *Extension) CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	return ext.bus.CountOwned(ctx, ownerID)
+}
+
 // QueryByUserID does not apply auditing.
 func (ext *Extension) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]orgbus.UserOrg, error) {
 	return ext.bus.QueryByUserID(ctx, userID)

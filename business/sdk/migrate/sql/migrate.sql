@@ -501,3 +501,14 @@ BEGIN
     WHERE project_id IS NULL
       AND id NOT IN (SELECT connection_id FROM alert_rules);
 END $$;
+-- Version: 1.26
+-- Description: Track org creator (owner) for per-user org limits and self-delete
+-- Nullable: legacy orgs predate ownership and stay owner-less (they simply
+-- don't count against anyone's limit and can't be self-deleted).
+ALTER TABLE organizations ADD COLUMN IF NOT EXISTS created_by UUID;
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'organizations_created_by_fk') THEN
+        ALTER TABLE organizations ADD CONSTRAINT organizations_created_by_fk FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS organizations_created_by_idx ON organizations (created_by);

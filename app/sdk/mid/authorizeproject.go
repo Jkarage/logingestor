@@ -57,16 +57,15 @@ func AuthorizeProjectManage(projectBus projectbus.ExtBusiness, orgBus orgbus.Ext
 				return next(ctx, r)
 			}
 
-			// Org admins manage only projects belonging to an org they are a
-			// member of — the role alone must never grant cross-org control.
-			if hasRole(ctx, role.OrgAdmin) {
-				ok, resp := isProjectOrgMember(ctx, projectBus, orgBus, projectID)
-				if resp != nil {
-					return resp
-				}
-				if ok {
-					return next(ctx, r)
-				}
+			// Org admins manage projects in their own org — but "org admin" is
+			// the caller's membership role in THAT org, not a global claim, so
+			// admin rights never leak across orgs.
+			orgRole, _, resp := callerOrgRole(ctx, projectBus, orgBus, projectID)
+			if resp != nil {
+				return resp
+			}
+			if orgRole == role.OrgAdmin {
+				return next(ctx, r)
 			}
 
 			// Project managers need explicit access to this project.
@@ -98,17 +97,17 @@ func requireProjectAccess(ctx context.Context, r *http.Request, projectBus proje
 		return projectID, nil
 	}
 
-	if hasRole(ctx, role.OrgAdmin) {
-		ok, resp := isProjectOrgMember(ctx, projectBus, orgBus, projectID)
-		if resp != nil {
-			return uuid.UUID{}, resp
-		}
-		if ok {
-			return projectID, nil
-		}
-		// Not a member of the project's org: fall through to the explicit
-		// per-project access check like any other user.
+	// An org admin of the project's own org can read every project in it. The
+	// role is taken from membership, not the global claim, so it can't leak
+	// across orgs.
+	orgRole, _, resp := callerOrgRole(ctx, projectBus, orgBus, projectID)
+	if resp != nil {
+		return uuid.UUID{}, resp
 	}
+	if orgRole == role.OrgAdmin {
+		return projectID, nil
+	}
+	// Otherwise fall through to the explicit per-project access check.
 
 	userID, err := GetUserID(ctx)
 	if err != nil {
@@ -126,33 +125,34 @@ func requireProjectAccess(ctx context.Context, r *http.Request, projectBus proje
 	return projectID, nil
 }
 
-// isProjectOrgMember reports whether the caller belongs to the org that owns
-// projectID. The second return value is a non-nil error response when the
-// lookup itself fails.
-func isProjectOrgMember(ctx context.Context, projectBus projectbus.ExtBusiness, orgBus orgbus.ExtBusiness, projectID uuid.UUID) (bool, web.Encoder) {
+// callerOrgRole resolves the caller's membership role in the org that owns
+// projectID. found is false when the caller is not a member of that org (role
+// is then the zero Role). The final return is a non-nil error response only
+// when a lookup itself fails.
+func callerOrgRole(ctx context.Context, projectBus projectbus.ExtBusiness, orgBus orgbus.ExtBusiness, projectID uuid.UUID) (role.Role, bool, web.Encoder) {
 	project, err := projectBus.QueryByID(ctx, projectID)
 	if err != nil {
 		if errors.Is(err, projectbus.ErrNotFound) {
-			return false, errs.New(errs.NotFound, err)
+			return role.Role{}, false, errs.New(errs.NotFound, err)
 		}
-		return false, errs.Errorf(errs.Internal, "querybyid: projectID[%s]: %s", projectID, err)
+		return role.Role{}, false, errs.Errorf(errs.Internal, "querybyid: projectID[%s]: %s", projectID, err)
 	}
 
 	userID, err := GetUserID(ctx)
 	if err != nil {
-		return false, errs.New(errs.Unauthenticated, err)
+		return role.Role{}, false, errs.New(errs.Unauthenticated, err)
 	}
 
 	userOrgs, err := orgBus.QueryByUserID(ctx, userID)
 	if err != nil {
-		return false, errs.Errorf(errs.Internal, "querybyuserid: userID[%s]: %s", userID, err)
+		return role.Role{}, false, errs.Errorf(errs.Internal, "querybyuserid: userID[%s]: %s", userID, err)
 	}
 
 	for _, uo := range userOrgs {
 		if uo.ID == project.OrgID {
-			return true, nil
+			return uo.Role, true, nil
 		}
 	}
 
-	return false, nil
+	return role.Role{}, false, nil
 }

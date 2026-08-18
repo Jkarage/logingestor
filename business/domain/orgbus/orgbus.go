@@ -16,10 +16,15 @@ import (
 	"github.com/jkarage/logingestor/foundation/logger"
 )
 
+// MaxOrgsPerUser is the maximum number of organizations a single user may own
+// (i.e. have created). Enforced server-side in Create.
+const MaxOrgsPerUser = 3
+
 // Set of error variables for CRUD operations.
 var (
 	ErrNotFound          = errors.New("org not found")
 	ErrUniqueSlug        = errors.New("slug is not unique")
+	ErrOrgLimitReached   = errors.New("organization limit reached")
 	ErrMemberExists      = errors.New("user is already a member")
 	ErrMemberNotFound    = errors.New("member not found")
 	ErrNoBillingAccount  = errors.New("no billing account")
@@ -42,6 +47,7 @@ type Storer interface {
 	QueryByID(ctx context.Context, orgID uuid.UUID) (Org, error)
 	QueryBySlug(ctx context.Context, slug string) (Org, error)
 	QueryByUserID(ctx context.Context, userID uuid.UUID) ([]UserOrg, error)
+	CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error)
 	UpdateEnabled(ctx context.Context, orgID uuid.UUID, enabled bool) error
 
 	// Membership
@@ -79,6 +85,7 @@ type ExtBusiness interface {
 	QueryByID(ctx context.Context, orgID uuid.UUID) (Org, error)
 	QueryBySlug(ctx context.Context, slug string) (Org, error)
 	QueryByUserID(ctx context.Context, userID uuid.UUID) ([]UserOrg, error)
+	CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error)
 	Activate(ctx context.Context, orgID uuid.UUID) error
 	Suspend(ctx context.Context, orgID uuid.UUID) error
 
@@ -147,6 +154,15 @@ func (b *Business) NewWithTx(tx sqldb.CommitRollbacker) (ExtBusiness, error) {
 
 // Create adds a new organization to the system and makes the creator an ORG ADMIN.
 func (b *Business) Create(ctx context.Context, actorID uuid.UUID, nu NewOrg) (Org, error) {
+	// Enforce the per-user ownership cap authoritatively, before any writes.
+	owned, err := b.storer.CountOwned(ctx, actorID)
+	if err != nil {
+		return Org{}, fmt.Errorf("countowned: %w", err)
+	}
+	if owned >= MaxOrgsPerUser {
+		return Org{}, ErrOrgLimitReached
+	}
+
 	now := time.Now()
 
 	org := Org{
@@ -154,6 +170,7 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, nu NewOrg) (Or
 		Name:        nu.Name,
 		Slug:        nu.Slug,
 		Enabled:     true,
+		CreatedBy:   &actorID,
 		DateCreated: now,
 		DateUpdated: now,
 	}
@@ -268,6 +285,17 @@ func (b *Business) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]UserO
 		return nil, fmt.Errorf("querybyuserid: %w", err)
 	}
 	return orgs, nil
+}
+
+// CountOwned returns the number of organizations created by (owned by) the
+// given user. Used to enforce the per-user ownership cap and to surface an
+// owned-count to the UI.
+func (b *Business) CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	n, err := b.storer.CountOwned(ctx, ownerID)
+	if err != nil {
+		return 0, fmt.Errorf("countowned: %w", err)
+	}
+	return n, nil
 }
 
 // Activate enables an organization.

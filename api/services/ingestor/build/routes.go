@@ -35,6 +35,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	userapp.Routes(app, userapp.Config{
 		Log:          cfg.Log,
 		UserBus:      cfg.BusConfig.UserBus,
+		OrgBus:       cfg.BusConfig.OrgBus,
 		AuthClient:   cfg.IngestorConfig.AuthClient,
 		Auth:         cfg.AuthConfig.Auth,
 		SigningKey:   cfg.SigningKey,

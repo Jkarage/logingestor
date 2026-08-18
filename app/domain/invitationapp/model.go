@@ -99,7 +99,7 @@ func toBusNewInvitation(app NewInvitation) (invitationbus.NewInvitation, error) 
 	}
 
 	r, err := role.Parse(app.Role)
-	if err != nil {
+	if err != nil || r == role.Admin {
 		fieldErrors.Add("role", fmt.Errorf("must be one of: ORG ADMIN, PROJECT MANAGER, VIEWER"))
 	}
 

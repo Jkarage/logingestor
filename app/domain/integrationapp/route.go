@@ -32,8 +32,7 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
-	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
 	// Read: any member with access to the project. Manage: project managers of
 	// that project, org admins of the project's org, and super admins (viewers
@@ -48,8 +47,8 @@ func Routes(app *web.App, cfg Config) {
 
 	// Read-only org aggregates across projects (admin view, org-admin only).
 	// Writes stay on the project-scoped routes below.
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/integrations", a.orgAggregate, authen, ruleOrgAdmin, orgMember)
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRulesByOrg, authen, ruleOrgAdmin, orgMember)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/integrations", a.orgAggregate, authen, orgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRulesByOrg, authen, orgAdmin)
 
 	// Project-scoped connection CRUD.
 	base := "/orgs/{org_id}/projects/{project_id}/integrations"

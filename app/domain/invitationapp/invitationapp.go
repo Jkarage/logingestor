@@ -224,6 +224,25 @@ func (a *app) revoke(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	// The middleware proves the caller administers {org_id} only; confirm the
+	// invitation actually lives there before revoking it.
+	inv, err := a.invitationBus.QueryByID(ctx, invID)
+	if err != nil {
+		if errors.Is(err, invitationbus.ErrNotFound) {
+			return errs.New(errs.NotFound, err)
+		}
+		return errs.Errorf(errs.Internal, "querybyid: invID[%s]: %s", invID, err)
+	}
+
+	if inv.OrgID != orgID {
+		return errs.New(errs.NotFound, invitationbus.ErrNotFound)
+	}
+
 	actorID := mid.GetSubjectID(ctx)
 
 	if err := a.invitationBus.Revoke(ctx, actorID, invID); err != nil {

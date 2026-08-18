@@ -28,14 +28,14 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 	ruleSuperAdmin := mid.Authorize(cfg.AuthClient, auth.RuleAdminOnly)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
-	ruleOrgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
 	api := newApp(cfg.AuditBus)
 
 	// Platform-wide audit log (super_admin only).
 	app.HandlerFunc(http.MethodGet, version, "/audit", api.query, authen, ruleSuperAdmin)
 
-	// Org-scoped audit log (org_admin or super_admin).
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/audit", api.queryByOrg, authen, ruleOrgMember, ruleOrgAdmin)
+	// Org-scoped audit log. "org admin" is the caller's membership role for
+	// {org_id}, not their global JWT role, so an invited ORG ADMIN qualifies.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/audit", api.queryByOrg, authen, orgAdmin)
 }

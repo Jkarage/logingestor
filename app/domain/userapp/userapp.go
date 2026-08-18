@@ -12,6 +12,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/app/sdk/query"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
@@ -23,14 +24,16 @@ import (
 type app struct {
 	emailBaseURL string
 	userBus      userbus.ExtBusiness
+	orgBus       orgbus.ExtBusiness
 	auth         *auth.Auth
 	mailer       *emailer.Config
 	signingKey   string
 }
 
-func newApp(emailBaseURL, signingKey string, mailer *emailer.Config, userBus userbus.ExtBusiness, auth *auth.Auth) *app {
+func newApp(emailBaseURL, signingKey string, mailer *emailer.Config, userBus userbus.ExtBusiness, orgBus orgbus.ExtBusiness, auth *auth.Auth) *app {
 	return &app{
 		userBus:      userBus,
+		orgBus:       orgBus,
 		auth:         auth,
 		emailBaseURL: emailBaseURL,
 		signingKey:   signingKey,
@@ -220,7 +223,14 @@ func (a *app) queryMe(ctx context.Context, _ *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "queryme: userID[%s]: %s", userID, err)
 	}
 
-	return toAppUser(usr)
+	owned, err := a.orgBus.CountOwned(ctx, userID)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "queryme: countowned: userID[%s]: %s", userID, err)
+	}
+
+	appUsr := toAppUser(usr)
+	appUsr.OwnedOrgCount = owned
+	return appUsr
 }
 
 func (a *app) queryByID(ctx context.Context, _ *http.Request) web.Encoder {

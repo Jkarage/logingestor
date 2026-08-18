@@ -20,6 +20,7 @@ type User struct {
 	Email         string   `json:"email"`
 	Roles         []string `json:"roles"`
 	Organizations []string `json:"orgs"`
+	OwnedOrgCount int      `json:"ownedOrgCount"`
 	Enabled       bool     `json:"enabled"`
 	DateCreated   string   `json:"dateCreated"`
 	DateUpdated   string   `json:"dateUpdated"`

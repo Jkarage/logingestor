@@ -53,9 +53,9 @@ func (s *Store) NewWithTx(tx sqldb.CommitRollbacker) (orgbus.Storer, error) {
 func (s *Store) Create(ctx context.Context, org orgbus.Org) error {
 	const q = `
 	INSERT INTO organizations
-		(id, name, slug, enabled, date_created, date_updated)
+		(id, name, slug, enabled, created_by, date_created, date_updated)
 	VALUES
-		(:id, :name, :slug, :enabled, :date_created, :date_updated)`
+		(:id, :name, :slug, :enabled, :created_by, :date_created, :date_updated)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBOrg(org)); err != nil {
 		if errors.Is(err, sqldb.ErrDBDuplicatedEntry) {
@@ -112,7 +112,7 @@ func (s *Store) Query(ctx context.Context, filter orgbus.QueryFilter, orderBy or
 
 	const q = `
 	SELECT
-		id, name, slug, enabled, date_created, date_updated
+		id, name, slug, enabled, created_by, date_created, date_updated
 	FROM
 		organizations`
 
@@ -166,7 +166,7 @@ func (s *Store) QueryByID(ctx context.Context, orgID uuid.UUID) (orgbus.Org, err
 
 	const q = `
 	SELECT
-		id, name, slug, enabled, date_created, date_updated
+		id, name, slug, enabled, created_by, date_created, date_updated
 	FROM
 		organizations
 	WHERE
@@ -193,7 +193,7 @@ func (s *Store) QueryBySlug(ctx context.Context, slug string) (orgbus.Org, error
 
 	const q = `
 	SELECT
-		id, name, slug, enabled, date_created, date_updated
+		id, name, slug, enabled, created_by, date_created, date_updated
 	FROM
 		organizations
 	WHERE
@@ -221,7 +221,7 @@ func (s *Store) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]orgbus.U
 
 	const q = `
 	SELECT
-		o.id, o.name, o.slug, o.enabled, o.date_created, o.date_updated,
+		o.id, o.name, o.slug, o.enabled, o.created_by, o.date_created, o.date_updated,
 		m.role
 	FROM
 		organizations o
@@ -238,6 +238,29 @@ func (s *Store) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]orgbus.U
 	}
 
 	return toBusUserOrgs(dbOrgs)
+}
+
+// CountOwned returns the number of organizations created by (owned by) ownerID.
+func (s *Store) CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	data := struct {
+		OwnerID string `db:"owner_id"`
+	}{
+		OwnerID: ownerID.String(),
+	}
+
+	const q = `
+	SELECT count(1)
+	FROM organizations
+	WHERE created_by = :owner_id`
+
+	var count struct {
+		Count int `db:"count"`
+	}
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &count); err != nil {
+		return 0, fmt.Errorf("db: %w", err)
+	}
+
+	return count.Count, nil
 }
 
 // UpdateEnabled sets the enabled flag on an organization.

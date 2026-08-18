@@ -30,13 +30,12 @@ func Routes(app *web.App, cfg Config) {
 	const version = "v1"
 
 	authen := mid.Authenticate(cfg.AuthClient)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
-	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
 	api := newApp(cfg.SourceBus, cfg.ProjectBus)
 
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources", api.query, authen, ruleOrgAdmin, orgMember)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources", api.create, authen, ruleOrgAdmin, orgMember)
-	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/sources/{source_id}", api.disconnect, authen, ruleOrgAdmin, orgMember)
-	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources/{source_id}/rotate-key", api.rotateKey, authen, ruleOrgAdmin, orgMember)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources", api.query, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources", api.create, authen, orgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/sources/{source_id}", api.disconnect, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources/{source_id}/rotate-key", api.rotateKey, authen, orgAdmin)
 }

@@ -42,11 +42,14 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 
 	org, err := a.orgBus.Create(ctx, mid.GetSubjectID(ctx), busNew)
 	if err != nil {
-		if errors.Is(err, orgbus.ErrUniqueSlug) {
-			return errs.New(errs.Aborted, orgbus.ErrUniqueSlug)
+		switch {
+		case errors.Is(err, orgbus.ErrUniqueSlug):
+			return errs.NewFieldErrors("slug", orgbus.ErrUniqueSlug)
+		case errors.Is(err, orgbus.ErrOrgLimitReached):
+			return errs.New(errs.OrgLimitReached, orgbus.ErrOrgLimitReached)
+		default:
+			return errs.Errorf(errs.Internal, "create: %s", err)
 		}
-
-		return errs.Errorf(errs.Internal, "create: %s", err)
 	}
 
 	return toAppOrg(org)
@@ -100,6 +103,10 @@ func (a *app) updateRole(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
+	if _, errResp := a.loadOrgMember(ctx, r, memberID); errResp != nil {
+		return errResp
+	}
+
 	member, err := a.orgBus.UpdateMemberRole(ctx, mid.GetSubjectID(ctx), memberID, busRole.Role)
 	if err != nil {
 		if errors.Is(err, orgbus.ErrMemberNotFound) {
@@ -118,6 +125,10 @@ func (a *app) removeMember(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
+	if _, errResp := a.loadOrgMember(ctx, r, memberID); errResp != nil {
+		return errResp
+	}
+
 	if err := a.orgBus.RemoveMember(ctx, mid.GetSubjectID(ctx), memberID); err != nil {
 		if errors.Is(err, orgbus.ErrMemberNotFound) {
 			return errs.New(errs.NotFound, err)
@@ -126,6 +137,31 @@ func (a *app) removeMember(ctx context.Context, r *http.Request) web.Encoder {
 	}
 
 	return nil
+}
+
+// loadOrgMember loads memberID and confirms it belongs to the org named by the
+// {org_id} path param. The org-admin middleware only proves the caller
+// administers THAT org, so without this an admin of one org could act on
+// membership rows of another. Returns a non-nil web.Encoder on failure.
+func (a *app) loadOrgMember(ctx context.Context, r *http.Request, memberID uuid.UUID) (orgbus.OrgMember, web.Encoder) {
+	orgID, err := uuid.Parse(web.Param(r, "org_id"))
+	if err != nil {
+		return orgbus.OrgMember{}, errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	member, err := a.orgBus.QueryMemberByID(ctx, memberID)
+	if err != nil {
+		if errors.Is(err, orgbus.ErrMemberNotFound) {
+			return orgbus.OrgMember{}, errs.New(errs.NotFound, err)
+		}
+		return orgbus.OrgMember{}, errs.Errorf(errs.Internal, "querymemberbyid: memberID[%s]: %s", memberID, err)
+	}
+
+	if member.OrgID != orgID {
+		return orgbus.OrgMember{}, errs.New(errs.NotFound, orgbus.ErrMemberNotFound)
+	}
+
+	return member, nil
 }
 
 func (a *app) delete(ctx context.Context, r *http.Request) web.Encoder {
@@ -211,7 +247,7 @@ func (a *app) queryMine(ctx context.Context, _ *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "querybyuserid: userID[%s]: %s", userID, err)
 	}
 
-	return toAppUserOrgs(orgs)
+	return toAppUserOrgs(orgs, userID)
 }
 
 func (a *app) queryByID(ctx context.Context, r *http.Request) web.Encoder {

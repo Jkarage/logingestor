@@ -88,6 +88,13 @@ func (ext *Extension) QueryByUserID(ctx context.Context, userID uuid.UUID) ([]or
 	return ext.bus.QueryByUserID(ctx, userID)
 }
 
+func (ext *Extension) CountOwned(ctx context.Context, ownerID uuid.UUID) (int, error) {
+	ctx, span := otel.AddSpan(ctx, "business.orgbus.countowned")
+	defer span.End()
+
+	return ext.bus.CountOwned(ctx, ownerID)
+}
+
 func (ext *Extension) Activate(ctx context.Context, orgID uuid.UUID) error {
 	ctx, span := otel.AddSpan(ctx, "business.orgbus.activate")
 	defer span.End()

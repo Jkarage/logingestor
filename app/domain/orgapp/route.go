@@ -27,19 +27,19 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 	ruleSuperAdmin := mid.Authorize(cfg.AuthClient, auth.RuleAdminOnly)
-	ruleAuthorizeUser := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleAdminOrSubject)
-	ruleOrgAdmin := mid.AuthorizeUser(cfg.AuthClient, cfg.UserBus, auth.RuleOrgAdminOnly)
 	ruleOrgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
+	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
+	orgOwner := mid.AuthorizeOrgOwner(cfg.OrgBus)
 
 	api := newApp(cfg.OrgBus, cfg.Auth)
 
 	app.HandlerFunc(http.MethodGet, version, "/orgs/mine", api.queryMine, authen)
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/members", api.queryOrgMembers, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/members/{member_id}", api.removeMember, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}", api.queryByID, authen, ruleOrgMember, ruleAuthorizeUser)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/members", api.queryOrgMembers, authen, orgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/members/{member_id}", api.removeMember, authen, orgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}", api.queryByID, authen, ruleOrgMember)
 	app.HandlerFunc(http.MethodGet, version, "/orgs", api.query, authen, ruleSuperAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs", api.create, authen)
-	app.HandlerFunc(http.MethodPut, version, "/orgs/role/{org_id}", api.updateRole, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}", api.update, authen, ruleOrgMember, ruleOrgAdmin)
-	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}", api.delete, authen, ruleOrgMember, ruleAuthorizeUser)
+	app.HandlerFunc(http.MethodPut, version, "/orgs/role/{org_id}", api.updateRole, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}", api.update, authen, orgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}", api.delete, authen, orgOwner)
 }

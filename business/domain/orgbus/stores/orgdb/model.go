@@ -13,12 +13,13 @@ import (
 
 // orgDB is the database representation of an organization.
 type orgDB struct {
-	ID          uuid.UUID `db:"id"`
-	Name        string    `db:"name"`
-	Slug        string    `db:"slug"`
-	Enabled     bool      `db:"enabled"`
-	DateCreated time.Time `db:"date_created"`
-	DateUpdated time.Time `db:"date_updated"`
+	ID          uuid.UUID  `db:"id"`
+	Name        string     `db:"name"`
+	Slug        string     `db:"slug"`
+	Enabled     bool       `db:"enabled"`
+	CreatedBy   *uuid.UUID `db:"created_by"`
+	DateCreated time.Time  `db:"date_created"`
+	DateUpdated time.Time  `db:"date_updated"`
 }
 
 func toDBOrg(bus orgbus.Org) orgDB {
@@ -27,6 +28,7 @@ func toDBOrg(bus orgbus.Org) orgDB {
 		Name:        bus.Name.String(),
 		Slug:        bus.Slug,
 		Enabled:     bus.Enabled,
+		CreatedBy:   bus.CreatedBy,
 		DateCreated: bus.DateCreated.UTC(),
 		DateUpdated: bus.DateUpdated.UTC(),
 	}
@@ -43,6 +45,7 @@ func toBusOrg(db orgDB) (orgbus.Org, error) {
 		Name:        nme,
 		Slug:        db.Slug,
 		Enabled:     db.Enabled,
+		CreatedBy:   db.CreatedBy,
 		DateCreated: db.DateCreated.In(time.Local),
 		DateUpdated: db.DateUpdated.In(time.Local),
 	}, nil
@@ -62,13 +65,14 @@ func toBusOrgs(dbs []orgDB) ([]orgbus.Org, error) {
 
 // userOrgDB is used for the JOIN query that fetches orgs a user belongs to.
 type userOrgDB struct {
-	ID          uuid.UUID `db:"id"`
-	Name        string    `db:"name"`
-	Slug        string    `db:"slug"`
-	Enabled     bool      `db:"enabled"`
-	DateCreated time.Time `db:"date_created"`
-	DateUpdated time.Time `db:"date_updated"`
-	Role        string    `db:"role"`
+	ID          uuid.UUID  `db:"id"`
+	Name        string     `db:"name"`
+	Slug        string     `db:"slug"`
+	Enabled     bool       `db:"enabled"`
+	CreatedBy   *uuid.UUID `db:"created_by"`
+	DateCreated time.Time  `db:"date_created"`
+	DateUpdated time.Time  `db:"date_updated"`
+	Role        string     `db:"role"`
 }
 
 func toBusUserOrg(db userOrgDB) (orgbus.UserOrg, error) {
@@ -88,6 +92,7 @@ func toBusUserOrg(db userOrgDB) (orgbus.UserOrg, error) {
 			Name:        nme,
 			Slug:        db.Slug,
 			Enabled:     db.Enabled,
+			CreatedBy:   db.CreatedBy,
 			DateCreated: db.DateCreated.In(time.Local),
 			DateUpdated: db.DateUpdated.In(time.Local),
 		},

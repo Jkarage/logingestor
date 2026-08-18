@@ -119,6 +119,10 @@ var (
 
 	// BadGateway indicates an upstream provider returned an error or invalid response.
 	BadGateway = ErrCode{value: 20}
+
+	// OrgLimitReached indicates the caller has reached the maximum number of
+	// organizations they may own.
+	OrgLimitReached = ErrCode{value: 21}
 )
 
 var codeNumbers = map[string]ErrCode{
@@ -143,6 +147,7 @@ var codeNumbers = map[string]ErrCode{
 	"too_many_requests":   TooManyRequests,
 	"internal_only_log":   InternalOnlyLog,
 	"bad_gateway":         BadGateway,
+	"org_limit_reached":   OrgLimitReached,
 }
 
 var codeNames = map[ErrCode]string{
@@ -167,6 +172,7 @@ var codeNames = map[ErrCode]string{
 	TooManyRequests:    "too_many_requests",
 	InternalOnlyLog:    "internal_only_log",
 	BadGateway:         "bad_gateway",
+	OrgLimitReached:    "org_limit_reached",
 }
 
 var httpStatus = map[ErrCode]int{
@@ -191,4 +197,5 @@ var httpStatus = map[ErrCode]int{
 	TooManyRequests:    http.StatusTooManyRequests,
 	InternalOnlyLog:    http.StatusInternalServerError,
 	BadGateway:         http.StatusBadGateway,
+	OrgLimitReached:    http.StatusConflict,
 }
