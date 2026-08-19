@@ -50,6 +50,22 @@ func (s *Store) BulkInsert(ctx context.Context, logs []logbus.Log) error {
 		 :source_type, :source_id, :host, :container, :pod, :namespace, :cluster,
 		 :unit, :facility, :region, :cloud_resource_id, :attributes)`
 
+	// The rows and the log_stats_daily deltas commit together so the rollup that
+	// backs /logs/stats can never drift from the rows it counts.
+	const rollupQ = `
+	INSERT INTO log_stats_hourly
+		(project_id, hour, source_type, source, level, count)
+	VALUES
+		(:project_id, :hour, :source_type, :source, :level, :count)
+	ON CONFLICT (project_id, hour, source_type, source, level)
+	DO UPDATE SET count = log_stats_hourly.count + EXCLUDED.count`
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begintxx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	for start := 0; start < len(logs); start += insertBatchSize {
 		end := min(start+insertBatchSize, len(logs))
 
@@ -58,12 +74,68 @@ func (s *Store) BulkInsert(ctx context.Context, logs []logbus.Log) error {
 			rows = append(rows, toDBLog(l))
 		}
 
-		if _, err := sqlx.NamedExecContext(ctx, s.db, q, rows); err != nil {
+		if _, err := tx.NamedExecContext(ctx, q, rows); err != nil {
 			return fmt.Errorf("namedexeccontext: %w", err)
 		}
 	}
 
+	if deltas := rollupDeltas(logs); len(deltas) > 0 {
+		if _, err := tx.NamedExecContext(ctx, rollupQ, deltas); err != nil {
+			return fmt.Errorf("namedexeccontext rollup: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
 	return nil
+}
+
+// rollupDeltas collapses a batch into one per-(project, UTC hour, source_type,
+// source, level) increment so a batch of N rows costs a handful of upserts, not N.
+func rollupDeltas(logs []logbus.Log) []statsDeltaDB {
+	type key struct {
+		projectID  uuid.UUID
+		hour       time.Time
+		sourceType string
+		source     string
+		level      string
+	}
+
+	counts := make(map[key]int)
+	for _, l := range logs {
+		k := key{
+			projectID:  l.ProjectID,
+			hour:       UTCHour(l.Timestamp),
+			sourceType: l.SourceType,
+			source:     l.Source,
+			level:      l.Level.String(),
+		}
+		counts[k]++
+	}
+
+	deltas := make([]statsDeltaDB, 0, len(counts))
+	for k, n := range counts {
+		deltas = append(deltas, statsDeltaDB{
+			ProjectID:  k.projectID,
+			Hour:       k.hour,
+			SourceType: k.sourceType,
+			Source:     k.source,
+			Level:      k.level,
+			Count:      n,
+		})
+	}
+
+	return deltas
+}
+
+// UTCHour truncates t to the start of its UTC hour, matching the bucket the
+// rollup is keyed on. Truncating in any other zone would land mid-hour for
+// offsets like +05:45 and split a single hour across two buckets.
+func UTCHour(t time.Time) time.Time {
+	utc := t.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), utc.Hour(), 0, 0, 0, time.UTC)
 }
 
 // QueryByID returns the log with the given id.
@@ -100,7 +172,10 @@ func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int,
 	SELECT ` + logColumns + `
 	FROM logs`
 
-	countBase := `SELECT count(1) FROM logs`
+	// The count is built as an inner SELECT so a bounded count can wrap it in a
+	// LIMIT. An exact count over a project holding most of the table degenerates
+	// to a sequential scan (~10s at 50M rows), so it is opt-in only.
+	countBase := `SELECT 1 FROM logs`
 
 	buf := bytes.NewBufferString(base)
 	countBuf := bytes.NewBufferString(countBase)
@@ -119,11 +194,28 @@ func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int,
 		return nil, 0, err
 	}
 
-	// Total count uses the same filters but without the cursor condition.
+	if filter.TotalMode == logbus.TotalNone {
+		return logs, 0, nil
+	}
+
+	// The total uses the same filters but never the cursor condition, so a page
+	// deep into the results still reports the whole matching set.
+	var countQuery string
+	switch filter.TotalMode {
+	case logbus.TotalExact:
+		countQuery = "SELECT count(1) AS count FROM (" + countBuf.String() + ") t"
+	default:
+		// Stop counting at the cap. The ORDER BY keeps this on
+		// logs_project_ts_idx instead of falling back to a seq scan.
+		data["count_cap"] = logbus.TotalCap
+		countQuery = "SELECT count(1) AS count FROM (" + countBuf.String() +
+			" ORDER BY ts DESC LIMIT :count_cap) t"
+	}
+
 	var count struct {
 		Count int `db:"count"`
 	}
-	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, countBuf.String(), data, &count); err != nil {
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, countQuery, data, &count); err != nil {
 		return nil, 0, fmt.Errorf("namedquerystruct count: %w", err)
 	}
 
@@ -137,9 +229,12 @@ func (s *Store) Stats(ctx context.Context, projectID uuid.UUID, sourceType *stri
 		"project_id": projectID.String(),
 	}
 
+	// Served from the log_stats_hourly rollup (migration 1.27). Counting from
+	// logs directly cost ~11s on a 50M-row project because a per-level
+	// GROUP BY has to visit every row for the project.
 	q := `
-	SELECT level, count(1) AS count
-	FROM logs
+	SELECT level, COALESCE(sum(count), 0) AS count
+	FROM log_stats_hourly
 	WHERE project_id = :project_id`
 
 	if sourceType != nil {

@@ -18,6 +18,8 @@ type Storer interface {
 	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, afterTs *time.Time, afterID *uuid.UUID) ([]Log, int, error)
 	Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error)
+	Timeseries(ctx context.Context, req TimeseriesRequest) ([]BucketCount, error)
+	Aggregate(ctx context.Context, req AggregateRequest) ([]Group, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -27,6 +29,8 @@ type ExtBusiness interface {
 	QueryByID(ctx context.Context, id uuid.UUID) (Log, error)
 	Query(ctx context.Context, filter QueryFilter, limit int, cursor string) (QueryResult, error)
 	Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error)
+	Timeseries(ctx context.Context, req TimeseriesRequest) ([]Bucket, error)
+	Aggregate(ctx context.Context, req AggregateRequest) ([]Group, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -135,11 +139,23 @@ func (b *Business) Query(ctx context.Context, filter QueryFilter, limit int, cur
 		nextCursor = &enc
 	}
 
-	return QueryResult{
+	result := QueryResult{
 		Logs:       logs,
 		NextCursor: nextCursor,
-		Total:      total,
-	}, nil
+	}
+
+	switch filter.TotalMode {
+	case TotalNone:
+		// Leave Total nil; the caller opted out.
+	case TotalExact:
+		result.Total = &total
+		result.TotalIsExact = true
+	default:
+		result.Total = &total
+		result.TotalIsExact = total < TotalCap
+	}
+
+	return result, nil
 }
 
 // Stats returns per-level counts for a project, optionally scoped to a
@@ -175,4 +191,63 @@ func decodeCursor(s string) (time.Time, uuid.UUID, error) {
 		return time.Time{}, uuid.UUID{}, fmt.Errorf("json: %w", err)
 	}
 	return c.TS, c.ID, nil
+}
+
+// Timeseries returns level counts bucketed by interval over the requested
+// range. Every bucket in the range is present, including empty ones, and every
+// bucket carries every level — so callers can plot without gap-filling.
+func (b *Business) Timeseries(ctx context.Context, req TimeseriesRequest) ([]Bucket, error) {
+	if err := req.validate(); err != nil {
+		return nil, err
+	}
+
+	rows, err := b.storer.Timeseries(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("timeseries: %w", err)
+	}
+
+	step := int64(req.Interval.Duration().Seconds())
+
+	// Buckets are floor(epoch/step)*step in SQL, so align the first bucket the
+	// same way or the series would be offset from the data.
+	first := req.From.UTC().Unix() / step * step
+
+	byTS := make(map[int64]int, 8)
+	buckets := make([]Bucket, 0, 16)
+
+	for ts := first; ts < req.To.UTC().Unix(); ts += step {
+		counts := make(map[string]int, 4)
+		for _, name := range LevelNames() {
+			counts[name] = 0
+		}
+
+		byTS[ts] = len(buckets)
+		buckets = append(buckets, Bucket{TS: time.Unix(ts, 0).UTC(), Counts: counts})
+	}
+
+	for _, r := range rows {
+		i, ok := byTS[r.TS.UTC().Unix()]
+		if !ok {
+			// A bucket outside the generated range can only mean the row fell on
+			// the exclusive upper bound; ignore rather than mis-plot it.
+			continue
+		}
+		buckets[i].Counts[r.Level] += r.Count
+	}
+
+	return buckets, nil
+}
+
+// Aggregate returns the top groups for the requested dimension over the range.
+func (b *Business) Aggregate(ctx context.Context, req AggregateRequest) ([]Group, error) {
+	if err := req.validate(); err != nil {
+		return nil, err
+	}
+
+	groups, err := b.storer.Aggregate(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate: %w", err)
+	}
+
+	return groups, nil
 }

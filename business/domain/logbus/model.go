@@ -95,6 +95,28 @@ type NewLog struct {
 	Attributes map[string]any
 }
 
+// TotalMode selects how (or whether) a log query computes its total row count.
+// An exact count over a project with tens of millions of rows forces a
+// sequential scan and costs ~10s, so it is never the default.
+type TotalMode int
+
+const (
+	// TotalBounded counts matching rows up to TotalCap and reports whether the
+	// cap was hit. This is the default and stays index-only.
+	TotalBounded TotalMode = iota
+
+	// TotalNone skips the count entirely.
+	TotalNone
+
+	// TotalExact runs a true count(1). Only for explicit opt-in; on a large
+	// project this is a multi-second sequential scan.
+	TotalExact
+)
+
+// TotalCap bounds a TotalBounded count. Callers should render a capped total as
+// "10,000+" rather than an exact figure.
+const TotalCap = 10000
+
 // QueryFilter holds filters for a log query.
 type QueryFilter struct {
 	ProjectID  uuid.UUID
@@ -103,11 +125,14 @@ type QueryFilter struct {
 	From       *time.Time
 	To         *time.Time
 	SourceType *string
+	TotalMode  TotalMode
 }
 
-// QueryResult holds a page of log results.
+// QueryResult holds a page of log results. Total is nil when the caller asked
+// for TotalNone; TotalIsExact is false when the count hit TotalCap.
 type QueryResult struct {
-	Logs       []Log
-	NextCursor *string
-	Total      int
+	Logs         []Log
+	NextCursor   *string
+	Total        *int
+	TotalIsExact bool
 }

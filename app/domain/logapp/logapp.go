@@ -3,6 +3,7 @@ package logapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/analyzebus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -30,9 +32,13 @@ type app struct {
 	hub        *Hub
 	authClient authclient.Authenticator
 	upgrader   websocket.Upgrader
+	tickets    *ticketStore
+
+	// usageBus is optional; nil disables app-log metering and quota enforcement.
+	usageBus usagebus.ExtBusiness
 }
 
-func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, analyzeBus *analyzebus.Business, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string) *app {
+func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus.ExtBusiness, analyzeBus *analyzebus.Business, hub *Hub, authClient authclient.Authenticator, allowedOrigins []string, usageBus usagebus.ExtBusiness) *app {
 	// Build an origin set for O(1) lookup.
 	originSet := make(map[string]struct{}, len(allowedOrigins))
 	for _, o := range allowedOrigins {
@@ -55,6 +61,8 @@ func newApp(log *logger.Logger, logBus logbus.ExtBusiness, projectBus projectbus
 		analyzeBus: analyzeBus,
 		hub:        hub,
 		authClient: authClient,
+		tickets:    newTicketStore(),
+		usageBus:   usageBus,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -78,6 +86,38 @@ func (a *app) ingest(ctx context.Context, r *http.Request) web.Encoder {
 	newLogs, fieldErrs := toBusNewLogs(req)
 	if fieldErrs != nil {
 		return fieldErrs.ToError()
+	}
+
+	// Resolve each distinct project once: its owning org drives both the
+	// suspension check below and the per-org quota check further down.
+	//
+	// A suspended organization accepts no new logs, regardless of the caller's
+	// role — suspension is a billing/lifecycle state, not an authorization one.
+	orgByProject := make(map[uuid.UUID]uuid.UUID)
+	for _, nl := range newLogs {
+		if _, done := orgByProject[nl.ProjectID]; done {
+			continue
+		}
+
+		project, err := a.projectBus.QueryByID(ctx, nl.ProjectID)
+		if err != nil {
+			if errors.Is(err, projectbus.ErrNotFound) {
+				return errs.Errorf(errs.NotFound, "project %s not found", nl.ProjectID)
+			}
+			return errs.Errorf(errs.Internal, "querybyid: projectID[%s]: %s", nl.ProjectID, err)
+		}
+		orgByProject[nl.ProjectID] = project.OrgID
+
+		enabled, err := a.projectBus.OrgEnabled(ctx, nl.ProjectID)
+		if err != nil {
+			if errors.Is(err, projectbus.ErrNotFound) {
+				return errs.Errorf(errs.NotFound, "project %s not found", nl.ProjectID)
+			}
+			return errs.Errorf(errs.Internal, "orgenabled: projectID[%s]: %s", nl.ProjectID, err)
+		}
+		if !enabled {
+			return errs.Errorf(errs.OrgSuspended, "organization for project %s is suspended", nl.ProjectID)
+		}
 	}
 
 	// Enforce project-level access unless the caller is a SUPER ADMIN.
@@ -109,10 +149,36 @@ func (a *app) ingest(ctx context.Context, r *http.Request) web.Encoder {
 		}
 	}
 
+	// Per-org daily app-log quota, checked once per distinct org in the batch.
+	if a.usageBus != nil {
+		checked := make(map[uuid.UUID]struct{}, len(orgByProject))
+		for _, orgID := range orgByProject {
+			if _, done := checked[orgID]; done {
+				continue
+			}
+			checked[orgID] = struct{}{}
+
+			status, err := a.usageBus.CheckAppQuota(ctx, orgID, time.Now().UTC())
+			if err != nil {
+				// Metering must not take ingestion down; log and let the write through.
+				a.log.Error(ctx, "ingest: check app quota", "orgID", orgID, "err", err)
+				continue
+			}
+			if status.Exceeded() {
+				a.log.Info(ctx, "ingest: app quota exceeded", "orgID", orgID,
+					"quota", status.Quota, "used", status.Used)
+				return errs.Errorf(errs.TooManyRequests,
+					"daily app-log ingest quota exceeded (%d events)", status.Quota)
+			}
+		}
+	}
+
 	logs, err := a.logBus.BulkCreate(ctx, newLogs)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "bulkcreate: %s", err)
 	}
+
+	a.recordAppUsage(ctx, logs, orgByProject)
 
 	ids := make([]string, len(logs))
 	entries := make([]LogEntry, len(logs))
@@ -193,6 +259,20 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 
 	cursor := q.Get("cursor")
 
+	// total=bounded (default) keeps the count index-only and capped;
+	// total=exact opts into a true count(1), which on a project holding tens of
+	// millions of rows is a multi-second sequential scan; total=none skips it.
+	switch q.Get("total") {
+	case "", "bounded":
+		filter.TotalMode = logbus.TotalBounded
+	case "none":
+		filter.TotalMode = logbus.TotalNone
+	case "exact":
+		filter.TotalMode = logbus.TotalExact
+	default:
+		return errs.New(errs.InvalidArgument, errors.New("invalid 'total': want bounded, exact, or none"))
+	}
+
 	result, err := a.logBus.Query(ctx, filter, limit, cursor)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "query: %s", err)
@@ -204,9 +284,10 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	}
 
 	return LogsResponse{
-		Logs:       appLogs,
-		NextCursor: result.NextCursor,
-		Total:      result.Total,
+		Logs:         appLogs,
+		NextCursor:   result.NextCursor,
+		Total:        result.Total,
+		TotalIsExact: result.TotalIsExact,
 	}
 }
 
@@ -284,47 +365,69 @@ func (a *app) analyze(ctx context.Context, r *http.Request) web.Encoder {
 // authclient that the HTTP middleware uses, reconstructing the expected
 // "Bearer <token>" header value from the query param.
 func (a *app) stream(w http.ResponseWriter, r *http.Request) {
-	// ── 1. Authenticate ───────────────────────────────────────────────────
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		http.Error(w, "missing token", http.StatusUnauthorized)
-		return
-	}
-
-	authResp, err := a.authClient.Authenticate(r.Context(), "Bearer "+token)
-	if err != nil {
-		a.log.Info(r.Context(), "stream: authenticate failed", "err", err)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// ── 2. Parse project ID ───────────────────────────────────────────────
+	// ── 1. Parse project ID ───────────────────────────────────────────────
 	projectID, err := uuid.Parse(web.Param(r, "project_id"))
 	if err != nil {
-		http.Error(w, "invalid project_id", http.StatusBadRequest)
+		streamError(w, http.StatusBadRequest, "invalid_argument", "invalid project_id")
 		return
 	}
 
-	// ── 2a. Authorize project access ──────────────────────────────────────
-	// Super admins have system-wide access; skip the per-project check.
-	isSuperAdmin := false
-	for _, claimRole := range authResp.Claims.Roles {
-		if claimRole == role.Admin.String() {
-			isSuperAdmin = true
-			break
-		}
-	}
-	if !isSuperAdmin {
-		ok, err := a.projectBus.HasAccess(r.Context(), authResp.UserID, projectID)
+	// ── 2. Authenticate ───────────────────────────────────────────────────
+	// Preferred: a single-use ticket from POST .../logs/stream-ticket. The
+	// ticket already encodes an authorized (user, project) pair, so redeeming it
+	// is both authentication and authorization.
+	//
+	// Deprecated fallback: ?token=<jwt>. The JWT leaks into proxy/LB access logs
+	// from the query string, which is why tickets exist. Delete this branch once
+	// the frontend has moved over.
+	if raw := r.URL.Query().Get("ticket"); raw != "" {
+		userID, err := a.tickets.consume(raw, projectID, time.Now())
 		if err != nil {
-			a.log.Info(r.Context(), "stream: hasaccess error", "userID", authResp.UserID, "projectID", projectID, "err", err)
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			status, code := http.StatusUnauthorized, "unauthenticated"
+			if errors.Is(err, errTicketProject) {
+				status, code = http.StatusForbidden, "permission_denied"
+			}
+			a.log.Info(r.Context(), "stream: ticket rejected", "projectID", projectID, "err", err)
+			streamError(w, status, code, err.Error())
 			return
 		}
-		if !ok {
-			a.log.Info(r.Context(), "stream: access denied", "userID", authResp.UserID, "projectID", projectID)
-			http.Error(w, "forbidden", http.StatusForbidden)
+		a.log.Info(r.Context(), "stream: ticket accepted", "userID", userID, "projectID", projectID)
+	} else {
+		token := r.URL.Query().Get("token")
+		if token == "" {
+			streamError(w, http.StatusUnauthorized, "unauthenticated", "missing stream ticket")
 			return
+		}
+
+		a.log.Info(r.Context(), "stream: deprecated ?token= auth used", "projectID", projectID)
+
+		authResp, err := a.authClient.Authenticate(r.Context(), "Bearer "+token)
+		if err != nil {
+			a.log.Info(r.Context(), "stream: authenticate failed", "err", err)
+			streamError(w, http.StatusUnauthorized, "unauthenticated", "unauthorized")
+			return
+		}
+
+		// Super admins have system-wide access; skip the per-project check.
+		isSuperAdmin := false
+		for _, claimRole := range authResp.Claims.Roles {
+			if claimRole == role.Admin.String() {
+				isSuperAdmin = true
+				break
+			}
+		}
+		if !isSuperAdmin {
+			ok, err := a.projectBus.HasAccess(r.Context(), authResp.UserID, projectID)
+			if err != nil {
+				a.log.Info(r.Context(), "stream: hasaccess error", "userID", authResp.UserID, "projectID", projectID, "err", err)
+				streamError(w, http.StatusInternalServerError, "internal", "internal error")
+				return
+			}
+			if !ok {
+				a.log.Info(r.Context(), "stream: access denied", "userID", authResp.UserID, "projectID", projectID)
+				streamError(w, http.StatusForbidden, "permission_denied", "forbidden")
+				return
+			}
 		}
 	}
 
@@ -349,4 +452,70 @@ func (a *app) stream(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+}
+
+// recordAppUsage folds the accepted batch into the per-project daily counters
+// that back GET /v1/orgs/{org_id}/usage and the app-log quota.
+//
+// Byte counts are an approximation: the message, source and the encoded
+// structured fields, not the raw HTTP payload, because one request may carry
+// entries for several projects and the wire bytes cannot be attributed exactly.
+//
+// Recording happens off the request path. Losing a counter update is preferable
+// to failing an ingest that has already been persisted.
+func (a *app) recordAppUsage(ctx context.Context, logs []logbus.Log, orgByProject map[uuid.UUID]uuid.UUID) {
+	if a.usageBus == nil || len(logs) == 0 {
+		return
+	}
+
+	type tally struct {
+		events int64
+		bytes  int64
+	}
+
+	byProject := make(map[uuid.UUID]*tally)
+
+	for _, l := range logs {
+		t, ok := byProject[l.ProjectID]
+		if !ok {
+			t = &tally{}
+			byProject[l.ProjectID] = t
+		}
+
+		t.events++
+		t.bytes += int64(len(l.Message) + len(l.Source))
+
+		for _, m := range []map[string]any{l.Meta, l.Attributes} {
+			if len(m) == 0 {
+				continue
+			}
+			if encoded, err := json.Marshal(m); err == nil {
+				t.bytes += int64(len(encoded))
+			}
+		}
+	}
+
+	day := time.Now().UTC()
+
+	deltas := make([]usagebus.AppUsage, 0, len(byProject))
+	for projectID, t := range byProject {
+		deltas = append(deltas, usagebus.AppUsage{
+			ProjectID:  projectID,
+			OrgID:      orgByProject[projectID],
+			Day:        day,
+			EventCount: t.events,
+			ByteCount:  t.bytes,
+		})
+	}
+
+	go func() {
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+
+		for _, d := range deltas {
+			if err := a.usageBus.RecordApp(bg, d); err != nil {
+				a.log.Error(bg, "ingest: record app usage", "projectID", d.ProjectID, "err", err)
+			}
+		}
+	}()
 }

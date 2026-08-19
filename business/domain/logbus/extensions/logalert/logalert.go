@@ -130,3 +130,11 @@ func (ext *Extension) Query(ctx context.Context, filter logbus.QueryFilter, limi
 func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID, sourceType *string) (map[string]int, error) {
 	return ext.bus.Stats(ctx, projectID, sourceType)
 }
+
+func (ext *Extension) Timeseries(ctx context.Context, req logbus.TimeseriesRequest) ([]logbus.Bucket, error) {
+	return ext.bus.Timeseries(ctx, req)
+}
+
+func (ext *Extension) Aggregate(ctx context.Context, req logbus.AggregateRequest) ([]logbus.Group, error) {
+	return ext.bus.Aggregate(ctx, req)
+}

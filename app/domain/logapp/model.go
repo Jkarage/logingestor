@@ -208,7 +208,12 @@ func toAppLogEntry(bus logbus.Log) LogEntry {
 type LogsResponse struct {
 	Logs       []LogEntry `json:"logs"`
 	NextCursor *string    `json:"nextCursor"`
-	Total      int        `json:"total"`
+
+	// Total is omitted when the caller passed total=none. TotalIsExact is false
+	// when the count stopped at the cap, in which case clients should render
+	// "<total>+" rather than an exact figure.
+	Total        *int `json:"total,omitempty"`
+	TotalIsExact bool `json:"totalIsExact"`
 }
 
 func (r LogsResponse) Encode() ([]byte, string, error) {

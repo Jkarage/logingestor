@@ -159,3 +159,13 @@ func toBusLogs(dbs []logDB) ([]logbus.Log, error) {
 	}
 	return logs, nil
 }
+
+// statsDeltaDB is one increment applied to the log_stats_hourly rollup.
+type statsDeltaDB struct {
+	ProjectID  uuid.UUID `db:"project_id"`
+	Hour       time.Time `db:"hour"`
+	SourceType string    `db:"source_type"`
+	Source     string    `db:"source"`
+	Level      string    `db:"level"`
+	Count      int       `db:"count"`
+}

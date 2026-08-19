@@ -48,3 +48,17 @@ func (ext *Extension) Stats(ctx context.Context, projectID uuid.UUID, sourceType
 
 	return ext.bus.Stats(ctx, projectID, sourceType)
 }
+
+func (ext *Extension) Timeseries(ctx context.Context, req logbus.TimeseriesRequest) ([]logbus.Bucket, error) {
+	ctx, span := otel.AddSpan(ctx, "business.logbus.timeseries")
+	defer span.End()
+
+	return ext.bus.Timeseries(ctx, req)
+}
+
+func (ext *Extension) Aggregate(ctx context.Context, req logbus.AggregateRequest) ([]logbus.Group, error) {
+	ctx, span := otel.AddSpan(ctx, "business.logbus.aggregate")
+	defer span.End()
+
+	return ext.bus.Aggregate(ctx, req)
+}
