@@ -11,6 +11,7 @@ import (
 	"github.com/jkarage/logingestor/business/sdk/order"
 	"github.com/jkarage/logingestor/business/sdk/page"
 	"github.com/jkarage/logingestor/foundation/logger"
+	"github.com/jkarage/logingestor/foundation/web"
 )
 
 // Storer interface declares the behavior this package needs to persist and
@@ -63,17 +64,24 @@ func (b *Business) Create(ctx context.Context, na NewAudit) (Audit, error) {
 		return Audit{}, fmt.Errorf("marshal object: %w", err)
 	}
 
+	// Taken from the request context rather than the caller, so every existing
+	// audit site records the actor's address without being touched. Background
+	// workers have no request in scope and leave both fields empty.
+	client := web.GetClientInfo(ctx)
+
 	audit := Audit{
-		ID:        uuid.New(),
-		OrgID:     na.OrgID,
-		ObjID:     na.ObjID,
-		ObjDomain: na.ObjDomain,
-		ObjName:   na.ObjName,
-		ActorID:   na.ActorID,
-		Action:    na.Action,
-		Data:      jsonData,
-		Message:   na.Message,
-		Timestamp: time.Now(),
+		ID:             uuid.New(),
+		OrgID:          na.OrgID,
+		ObjID:          na.ObjID,
+		ObjDomain:      na.ObjDomain,
+		ObjName:        na.ObjName,
+		ActorID:        na.ActorID,
+		Action:         na.Action,
+		Data:           jsonData,
+		Message:        na.Message,
+		Timestamp:      time.Now().UTC(),
+		ActorIP:        client.IP,
+		ActorUserAgent: client.UserAgent,
 	}
 
 	if err := b.storer.Create(ctx, audit); err != nil {

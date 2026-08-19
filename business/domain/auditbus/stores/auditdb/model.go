@@ -1,6 +1,7 @@
 package auditdb
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -23,6 +24,11 @@ type audit struct {
 	Data      types.NullJSONText `db:"data"`
 	Message   string             `db:"message"`
 	Timestamp time.Time          `db:"timestamp"`
+
+	// NULL for actions with no request in scope (background workers), so both
+	// are nullable rather than empty strings.
+	ActorIP        sql.NullString `db:"actor_ip"`
+	ActorUserAgent sql.NullString `db:"actor_user_agent"`
 }
 
 func toDBAudit(bus auditbus.Audit) (audit, error) {
@@ -37,6 +43,13 @@ func toDBAudit(bus auditbus.Audit) (audit, error) {
 		Data:      types.NullJSONText{JSONText: []byte(bus.Data), Valid: true},
 		Message:   bus.Message,
 		Timestamp: bus.Timestamp.UTC(),
+	}
+
+	if bus.ActorIP != "" {
+		db.ActorIP = sql.NullString{String: bus.ActorIP, Valid: true}
+	}
+	if bus.ActorUserAgent != "" {
+		db.ActorUserAgent = sql.NullString{String: bus.ActorUserAgent, Valid: true}
 	}
 
 	return db, nil
@@ -60,6 +73,9 @@ func toBusAudit(db audit) (auditbus.Audit, error) {
 		Data:      json.RawMessage(db.Data.JSONText),
 		Message:   db.Message,
 		Timestamp: db.Timestamp.Local(),
+
+		ActorIP:        db.ActorIP.String,
+		ActorUserAgent: db.ActorUserAgent.String,
 	}
 
 	return bus, nil

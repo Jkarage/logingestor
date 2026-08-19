@@ -21,6 +21,11 @@ type Audit struct {
 	Data      json.RawMessage
 	Message   string
 	Timestamp time.Time
+
+	// ActorIP and ActorUserAgent record where the action came from. Both are
+	// empty for actions taken by background workers, which have no request.
+	ActorIP        string
+	ActorUserAgent string
 }
 
 // NewAudit represents the information needed to create a new audit record.

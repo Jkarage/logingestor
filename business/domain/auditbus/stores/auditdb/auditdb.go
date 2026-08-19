@@ -32,9 +32,11 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 func (s *Store) Create(ctx context.Context, a auditbus.Audit) error {
 	const q = `
 	INSERT INTO audit
-		(id, org_id, obj_id, obj_domain, obj_name, actor_id, action, data, message, timestamp)
+		(id, org_id, obj_id, obj_domain, obj_name, actor_id, action, data, message, timestamp,
+		 actor_ip, actor_user_agent)
 	VALUES
-		(:id, :org_id, :obj_id, :obj_domain, :obj_name, :actor_id, :action, :data, :message, :timestamp)`
+		(:id, :org_id, :obj_id, :obj_domain, :obj_name, :actor_id, :action, :data, :message, :timestamp,
+		 :actor_ip, :actor_user_agent)`
 
 	dbAudit, err := toDBAudit(a)
 	if err != nil {
@@ -57,6 +59,7 @@ func (s *Store) Query(ctx context.Context, filter auditbus.QueryFilter, orderBy 
 	const q = `
 	SELECT
 		a.id, a.org_id, a.obj_id, a.obj_domain, a.obj_name, a.actor_id, a.action, a.data, a.message, a.timestamp,
+		a.actor_ip, a.actor_user_agent,
 		COALESCE(u.name, '') AS actor_name
 	FROM
 		audit a

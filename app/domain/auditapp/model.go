@@ -20,6 +20,10 @@ type Audit struct {
 	Data      json.RawMessage `json:"meta"`
 	Message   string          `json:"message"`
 	Timestamp string          `json:"createdAt"`
+
+	// Empty for actions taken by background workers, which have no request.
+	ActorIP        string `json:"actorIp,omitempty"`
+	ActorUserAgent string `json:"actorUserAgent,omitempty"`
 }
 
 // Encode implements the encoder interface.
@@ -59,6 +63,9 @@ func toAppAudit(bus auditbus.Audit) Audit {
 		Data:      meta,
 		Message:   bus.Message,
 		Timestamp: bus.Timestamp.Format(time.RFC3339),
+
+		ActorIP:        bus.ActorIP,
+		ActorUserAgent: bus.ActorUserAgent,
 	}
 }
 
