@@ -42,8 +42,8 @@ func (p *Jira) Send(ctx context.Context, creds map[string]string, payload integr
 
 	body := map[string]any{
 		"fields": map[string]any{
-			"project":     map[string]string{"key": project},
-			"summary":     fmt.Sprintf("[%s] %s: %s", payload.Level, payload.ProjectName, payload.Message),
+			"project": map[string]string{"key": project},
+			"summary": fmt.Sprintf("[%s] %s: %s", payload.Level, payload.ProjectName, payload.Message),
 			"description": map[string]any{
 				"type":    "doc",
 				"version": 1,

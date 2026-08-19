@@ -11,8 +11,8 @@ import (
 	"time"
 
 	stripe "github.com/stripe/stripe-go/v82"
-	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	portalSession "github.com/stripe/stripe-go/v82/billingportal/session"
+	checkoutsession "github.com/stripe/stripe-go/v82/checkout/session"
 	stripesubscription "github.com/stripe/stripe-go/v82/subscription"
 
 	"github.com/google/uuid"

@@ -15,9 +15,9 @@ import (
 
 // Set of error variables for CRUD operations.
 var (
-	ErrNotFound      = errors.New("invitation not found")
-	ErrAlreadyUsed   = errors.New("invitation has already been accepted")
-	ErrExpired       = errors.New("invitation has expired")
+	ErrNotFound    = errors.New("invitation not found")
+	ErrAlreadyUsed = errors.New("invitation has already been accepted")
+	ErrExpired     = errors.New("invitation has expired")
 )
 
 // Storer interface declares the behavior this package needs to persist and

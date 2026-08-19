@@ -613,16 +613,16 @@ func (s *Store) UpdateSubscriptionByStripeID(ctx context.Context, stripeSubID st
 	}
 
 	data := struct {
-		LookupStripeSubID    string     `db:"lookup_stripe_sub_id"`
-		PlanID               uuid.UUID  `db:"plan_id"`
-		Status               string     `db:"status"`
-		StripeCustomerID     *string    `db:"stripe_customer_id"`
-		NewStripeSubID       *string    `db:"new_stripe_sub_id"`
-		CancelAtPeriodEnd    bool       `db:"cancel_at_period_end"`
-		CancelledAt          *time.Time `db:"cancelled_at"`
-		PeriodStart          *time.Time `db:"period_start"`
-		PeriodEnd            *time.Time `db:"period_end"`
-		DateUpdated          time.Time  `db:"date_updated"`
+		LookupStripeSubID string     `db:"lookup_stripe_sub_id"`
+		PlanID            uuid.UUID  `db:"plan_id"`
+		Status            string     `db:"status"`
+		StripeCustomerID  *string    `db:"stripe_customer_id"`
+		NewStripeSubID    *string    `db:"new_stripe_sub_id"`
+		CancelAtPeriodEnd bool       `db:"cancel_at_period_end"`
+		CancelledAt       *time.Time `db:"cancelled_at"`
+		PeriodStart       *time.Time `db:"period_start"`
+		PeriodEnd         *time.Time `db:"period_end"`
+		DateUpdated       time.Time  `db:"date_updated"`
 	}{
 		LookupStripeSubID: stripeSubID,
 		PlanID:            sub.PlanID,

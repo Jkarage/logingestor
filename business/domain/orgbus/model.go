@@ -133,15 +133,15 @@ type PlanFeatures struct {
 
 // Plan represents a row in the plans catalog table.
 type Plan struct {
-	PlanID         uuid.UUID
-	Slug           SubscriptionPlan
-	Name           string
-	PriceCents     int
-	Interval       string
-	StripePriceID  string
-	Features       PlanFeatures
-	IsActive       bool
-	CreatedAt      time.Time
+	PlanID        uuid.UUID
+	Slug          SubscriptionPlan
+	Name          string
+	PriceCents    int
+	Interval      string
+	StripePriceID string
+	Features      PlanFeatures
+	IsActive      bool
+	CreatedAt     time.Time
 }
 
 // OrgMemberUser combines membership metadata with the user's profile.

@@ -20,7 +20,7 @@ func NewBeemSMS() *BeemSMS { return &BeemSMS{} }
 
 // beemResponse is the top-level shape of a Beem Africa API response.
 type beemResponse struct {
-	Code int    `json:"code"`
+	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 

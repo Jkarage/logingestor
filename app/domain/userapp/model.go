@@ -198,4 +198,3 @@ type ConfirmUser struct {
 func (app *ConfirmUser) Decode(data []byte) error {
 	return json.Unmarshal(data, app)
 }
-
