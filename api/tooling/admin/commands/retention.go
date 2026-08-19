@@ -3,7 +3,9 @@ package commands
 import (
 	"context"
 	"fmt"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
@@ -19,14 +21,25 @@ func Retention(log *logger.Logger, cfg sqldb.Config) error {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// A manual run drains the whole backlog rather than stopping on the budget
+	// the scheduled worker uses, so there is no row or time cap here. Deletes are
+	// still batched, and cancelling (Ctrl-C) stops cleanly between batches.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	res, err := retention.Run(ctx, log, db)
+	cfg2 := retention.DefaultConfig()
+	cfg2.MaxRows = 0
+	cfg2.MaxRuntime = 0
+
+	res, err := retention.Run(ctx, log, db, cfg2)
 	if err != nil {
 		return fmt.Errorf("retention: %w", err)
 	}
 
-	fmt.Printf("retention complete: infra_deleted=%d app_deleted=%d\n", res.InfraDeleted, res.AppDeleted)
+	fmt.Printf("retention complete: infra_deleted=%d app_deleted=%d incomplete=%t\n",
+		res.InfraDeleted, res.AppDeleted, res.Incomplete)
+	if res.Incomplete {
+		fmt.Println("stopped early (cancelled); re-run to continue")
+	}
 	return nil
 }
