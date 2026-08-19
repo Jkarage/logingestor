@@ -181,6 +181,7 @@ func (a *App) HandlerFunc(method string, group string, path string, handlerFunc 
 	h := func(w http.ResponseWriter, r *http.Request) {
 		ctx := setTracer(r.Context(), a.tracer)
 		ctx = setWriter(ctx, w)
+		ctx = setClientInfo(ctx, clientInfoFrom(r))
 
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(w.Header()))
 
@@ -233,6 +234,7 @@ func (a *App) RawHandlerFunc(method string, group string, path string, rawHandle
 	h := func(w http.ResponseWriter, r *http.Request) {
 		ctx := setTracer(r.Context(), a.tracer)
 		ctx = setWriter(ctx, w)
+		ctx = setClientInfo(ctx, clientInfoFrom(r))
 
 		otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(w.Header()))
 

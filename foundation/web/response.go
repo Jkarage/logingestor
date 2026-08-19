@@ -27,6 +27,12 @@ type httpStatus interface {
 	HTTPStatus() int
 }
 
+// redirector is implemented by responses that are an HTTP redirect. When a
+// response satisfies it, Respond sets Location and writes no body.
+type redirector interface {
+	Location() string
+}
+
 // Respond sends a response to the client.
 func Respond(ctx context.Context, w http.ResponseWriter, resp Encoder) error {
 	if _, ok := resp.(NoResponse); ok {
@@ -57,6 +63,14 @@ func Respond(ctx context.Context, w http.ResponseWriter, resp Encoder) error {
 	}
 
 	if statusCode == http.StatusNoContent {
+		w.WriteHeader(statusCode)
+		return nil
+	}
+
+	// A redirect carries its destination in a header and has no body, so it
+	// bypasses encoding entirely.
+	if v, ok := resp.(redirector); ok {
+		w.Header().Set("Location", v.Location())
 		w.WriteHeader(statusCode)
 		return nil
 	}
