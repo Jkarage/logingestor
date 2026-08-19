@@ -652,3 +652,63 @@ CREATE TABLE IF NOT EXISTS org_scim_tokens (
     CONSTRAINT org_scim_tokens_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS org_scim_tokens_hash_idx ON org_scim_tokens (token_hash);
+
+-- Version: 1.34
+-- Description: Alerting maturity — rule conditions, dedup/snooze/maintenance, event history
+-- Rules previously carried a single `level` and fired on every matching batch,
+-- with no memory: a hundred errors meant a hundred notifications. The condition
+-- column generalises the trigger, and alert_events gives each alert an identity
+-- so repeats collapse onto one open row.
+ALTER TABLE alert_rules
+ADD COLUMN IF NOT EXISTS condition JSONB,
+    ADD COLUMN IF NOT EXISTS dedup_window_seconds INT NOT NULL DEFAULT 300,
+    ADD COLUMN IF NOT EXISTS snooze_until TIMESTAMPTZ NULL;
+-- Existing rules keep behaving identically, expressed as a level condition.
+UPDATE alert_rules
+SET condition = jsonb_build_object('type', 'level', 'level', level)
+WHERE condition IS NULL;
+ALTER TABLE alert_rules
+ALTER COLUMN condition SET NOT NULL;
+-- One open event per (rule, dedup_key) is what makes repeats collapse; the
+-- partial unique index enforces it rather than trusting the application.
+CREATE TABLE IF NOT EXISTS alert_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    rule_id UUID NOT NULL,
+    org_id UUID NOT NULL,
+    project_id UUID NOT NULL,
+    dedup_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('firing', 'acknowledged', 'resolved')),
+    summary TEXT NOT NULL,
+    level TEXT NOT NULL,
+    match_count BIGINT NOT NULL DEFAULT 1,
+    sample_log_id UUID NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_notified_at TIMESTAMPTZ NULL,
+    resolved_at TIMESTAMPTZ NULL,
+    acknowledged_at TIMESTAMPTZ NULL,
+    acknowledged_by UUID NULL,
+    CONSTRAINT alert_events_rule_fk FOREIGN KEY (rule_id) REFERENCES alert_rules (id) ON DELETE CASCADE,
+    CONSTRAINT alert_events_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT alert_events_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS alert_events_open_uq ON alert_events (rule_id, dedup_key)
+WHERE state <> 'resolved';
+CREATE INDEX IF NOT EXISTS alert_events_org_time_idx ON alert_events (org_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS alert_events_project_time_idx ON alert_events (project_id, last_seen_at DESC);
+-- A maintenance window suppresses delivery without disabling rules, so nothing
+-- has to be remembered and switched back on afterwards.
+CREATE TABLE IF NOT EXISTS alert_maintenance_windows (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    project_id UUID NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    starts_at TIMESTAMPTZ NOT NULL,
+    ends_at TIMESTAMPTZ NOT NULL,
+    created_by UUID NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT amw_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT amw_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT amw_range CHECK (ends_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS amw_org_window_idx ON alert_maintenance_windows (org_id, starts_at, ends_at);
