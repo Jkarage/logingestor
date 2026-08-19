@@ -36,6 +36,7 @@ type Storer interface {
 	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error
 	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
+	OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -53,6 +54,7 @@ type ExtBusiness interface {
 	QueryByOrg(ctx context.Context, orgID uuid.UUID) ([]Project, error)
 	GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error
 	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
+	OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -207,6 +209,17 @@ func (b *Business) HasAccess(ctx context.Context, userID uuid.UUID, projectID uu
 	ok, err := b.storer.HasAccess(ctx, userID, projectID)
 	if err != nil {
 		return false, fmt.Errorf("hasaccess: %w", err)
+	}
+	return ok, nil
+}
+
+// OrgEnabled reports whether the organization owning projectID is enabled. A
+// suspended org must not accept new logs, so the ingest paths gate on this.
+// Reads stay permitted so an owner can still inspect data and re-enable.
+func (b *Business) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	ok, err := b.storer.OrgEnabled(ctx, projectID)
+	if err != nil {
+		return false, fmt.Errorf("orgenabled: %w", err)
 	}
 	return ok, nil
 }

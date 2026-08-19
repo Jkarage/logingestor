@@ -211,3 +211,8 @@ func (ext *Extension) GrantProjectAccess(ctx context.Context, actorID uuid.UUID,
 func (ext *Extension) HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error) {
 	return ext.bus.HasAccess(ctx, userID, projectID)
 }
+
+// OrgEnabled does not apply auditing.
+func (ext *Extension) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	return ext.bus.OrgEnabled(ctx, projectID)
+}

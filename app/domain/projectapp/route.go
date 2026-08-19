@@ -31,7 +31,7 @@ func Routes(app *web.App, cfg Config) {
 	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
 	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
-	api := newApp(cfg.ProjectBus)
+	api := newApp(cfg.ProjectBus, cfg.OrgBus)
 
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/projects", api.query, authen, orgMember)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/projects", api.create, authen, orgAdmin)

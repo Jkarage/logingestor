@@ -298,3 +298,33 @@ func (s *Store) QueryAccessible(ctx context.Context, orgID uuid.UUID, userID uui
 
 	return toBusProjects(dbProjects), nil
 }
+
+// OrgEnabled reports whether the org owning projectID is enabled. A missing
+// project reports ErrNotFound rather than a silent false, so the caller can
+// tell "suspended" from "does not exist".
+func (s *Store) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	data := struct {
+		ProjectID string `db:"project_id"`
+	}{
+		ProjectID: projectID.String(),
+	}
+
+	const q = `
+	SELECT o.enabled
+	FROM projects p
+	JOIN organizations o ON o.id = p.org_id
+	WHERE p.id = :project_id`
+
+	var row struct {
+		Enabled bool `db:"enabled"`
+	}
+
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return false, fmt.Errorf("db: %w", projectbus.ErrNotFound)
+		}
+		return false, fmt.Errorf("db: %w", err)
+	}
+
+	return row.Enabled, nil
+}

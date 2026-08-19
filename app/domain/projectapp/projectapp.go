@@ -4,11 +4,13 @@ package projectapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
+	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -16,12 +18,40 @@ import (
 
 type app struct {
 	projectBus projectbus.ExtBusiness
+	orgBus     orgbus.ExtBusiness
 }
 
-func newApp(projectBus projectbus.ExtBusiness) *app {
+func newApp(projectBus projectbus.ExtBusiness, orgBus orgbus.ExtBusiness) *app {
 	return &app{
 		projectBus: projectBus,
+		orgBus:     orgBus,
 	}
+}
+
+// planRetentionLimit returns the longest retention, in days, the org's plan
+// allows. A negative result means unlimited.
+func (a *app) planRetentionLimit(ctx context.Context, orgID uuid.UUID) (int, error) {
+	sub, err := a.orgBus.QuerySubscription(ctx, orgID)
+	if err != nil {
+		// No subscription row: treat as unconstrained rather than blocking edits.
+		if errors.Is(err, orgbus.ErrNoBillingAccount) || errors.Is(err, orgbus.ErrNotFound) {
+			return -1, nil
+		}
+		return 0, fmt.Errorf("querysubscription: %w", err)
+	}
+
+	plans, err := a.orgBus.QueryAllPlans(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("queryallplans: %w", err)
+	}
+
+	for _, p := range plans {
+		if p.PlanID == sub.PlanID {
+			return p.Features.LogRetentionDays, nil
+		}
+	}
+
+	return -1, nil
 }
 
 func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
@@ -94,6 +124,20 @@ func (a *app) update(ctx context.Context, r *http.Request) web.Encoder {
 	// actually belong to that org or the check is meaningless.
 	if resp := requireProjectInOrg(r, project); resp != nil {
 		return resp
+	}
+
+	// Retention may not exceed what the org's plan allows. A nil override means
+	// "inherit the plan", which is always within limits.
+	if busUpdate.RetentionDays != nil && *busUpdate.RetentionDays != nil {
+		limit, err := a.planRetentionLimit(ctx, project.OrgID)
+		if err != nil {
+			return errs.Errorf(errs.Internal, "planretentionlimit: orgID[%s]: %s", project.OrgID, err)
+		}
+
+		if limit >= 0 && **busUpdate.RetentionDays > limit {
+			return errs.Errorf(errs.RetentionExceedsPlan,
+				"retentionDays %d exceeds the plan limit of %d days", **busUpdate.RetentionDays, limit)
+		}
 	}
 
 	updated, err := a.projectBus.Update(ctx, mid.GetSubjectID(ctx), project, busUpdate)

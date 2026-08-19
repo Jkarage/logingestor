@@ -97,3 +97,10 @@ func (ext *Extension) HasAccess(ctx context.Context, userID uuid.UUID, projectID
 
 	return ext.bus.HasAccess(ctx, userID, projectID)
 }
+
+func (ext *Extension) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error) {
+	ctx, span := otel.AddSpan(ctx, "business.projectbus.orgenabled")
+	defer span.End()
+
+	return ext.bus.OrgEnabled(ctx, projectID)
+}
