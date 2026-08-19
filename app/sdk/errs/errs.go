@@ -3,6 +3,7 @@ package errs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 )
@@ -45,10 +46,36 @@ func (ec ErrCode) Equal(ec2 ErrCode) bool {
 
 // Error represents an error in the system.
 type Error struct {
-	Code     ErrCode `json:"code"`
-	Message  string  `json:"message"`
-	FuncName string  `json:"-"`
-	FileName string  `json:"-"`
+	Code     ErrCode       `json:"code"`
+	Message  string        `json:"message"`
+	Details  []FieldDetail `json:"-"`
+	FuncName string        `json:"-"`
+	FileName string        `json:"-"`
+}
+
+// FieldDetail is one per-field problem reported under "details".
+type FieldDetail struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
+}
+
+// MarshalJSON emits the wire envelope:
+//
+//	{ "error": "<stable_code>", "message": "...", "details": [ ... ] }
+//
+// "code" is retained as an alias of "error" so existing clients keep working.
+func (e *Error) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Err     string        `json:"error"`
+		Code    string        `json:"code"`
+		Message string        `json:"message"`
+		Details []FieldDetail `json:"details,omitempty"`
+	}{
+		Err:     e.Code.String(),
+		Code:    e.Code.String(),
+		Message: e.Message,
+		Details: e.Details,
+	})
 }
 
 // New constructs an error based on an app error.
@@ -128,9 +155,18 @@ func (fe *FieldErrors) Add(field string, err error) {
 	})
 }
 
-// ToError converts the field errors to an Error.
+// ToError converts the field errors to an Error, surfacing each one under
+// "details" so clients don't have to parse the message.
 func (fe FieldErrors) ToError() *Error {
-	return New(InvalidArgument, fe)
+	details := make([]FieldDetail, len(fe))
+	for i, f := range fe {
+		details[i] = FieldDetail{Field: f.Field, Message: f.Err}
+	}
+
+	err := New(InvalidArgument, errors.New("validation failed"))
+	err.Details = details
+
+	return err
 }
 
 // Error implements the error interface.

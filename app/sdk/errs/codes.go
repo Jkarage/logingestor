@@ -123,79 +123,133 @@ var (
 	// OrgLimitReached indicates the caller has reached the maximum number of
 	// organizations they may own.
 	OrgLimitReached = ErrCode{value: 21}
+
+	// SlugTaken indicates the requested org slug is already in use.
+	SlugTaken = ErrCode{value: 22}
+
+	// RetentionExceedsPlan indicates the requested retention window is longer
+	// than the org's plan allows.
+	RetentionExceedsPlan = ErrCode{value: 23}
+
+	// OrgSuspended indicates the organization is deactivated and is not
+	// accepting new data.
+	OrgSuspended = ErrCode{value: 24}
+
+	// LastOrgAdmin indicates the operation would leave the organization with no
+	// admin.
+	LastOrgAdmin = ErrCode{value: 25}
+
+	// CannotModifyOwner indicates the target member is the organization owner
+	// and may not be removed or demoted.
+	CannotModifyOwner = ErrCode{value: 26}
+
+	// ConfirmationRequired indicates a destructive action needs an explicit
+	// confirmation value that was missing or did not match.
+	ConfirmationRequired = ErrCode{value: 27}
+
+	// OtherAdminsExist indicates a destructive action was refused because other
+	// admins would be affected; it can be retried with force.
+	OtherAdminsExist = ErrCode{value: 28}
+
+	// KeyExpired indicates the presented ingest key is past its expiry.
+	KeyExpired = ErrCode{value: 29}
 )
 
 var codeNumbers = map[string]ErrCode{
-	"ok":                  None,
-	"no_content":          NoContent,
-	"canceled":            Canceled,
-	"unknown":             Unknown,
-	"invalid_argument":    InvalidArgument,
-	"deadline_exceeded":   DeadlineExceeded,
-	"not_found":           NotFound,
-	"already_exists":      AlreadyExists,
-	"permission_denied":   PermissionDenied,
-	"resource_exhausted":  ResourceExhausted,
-	"failed_precondition": FailedPrecondition,
-	"aborted":             Aborted,
-	"out_of_range":        OutOfRange,
-	"unimplemented":       Unimplemented,
-	"internal":            Internal,
-	"unavailable":         Unavailable,
-	"data_loss":           DataLoss,
-	"unauthenticated":     Unauthenticated,
-	"too_many_requests":   TooManyRequests,
-	"internal_only_log":   InternalOnlyLog,
-	"bad_gateway":         BadGateway,
-	"org_limit_reached":   OrgLimitReached,
+	"ok":                     None,
+	"no_content":             NoContent,
+	"canceled":               Canceled,
+	"unknown":                Unknown,
+	"invalid_argument":       InvalidArgument,
+	"deadline_exceeded":      DeadlineExceeded,
+	"not_found":              NotFound,
+	"already_exists":         AlreadyExists,
+	"permission_denied":      PermissionDenied,
+	"resource_exhausted":     ResourceExhausted,
+	"failed_precondition":    FailedPrecondition,
+	"aborted":                Aborted,
+	"out_of_range":           OutOfRange,
+	"unimplemented":          Unimplemented,
+	"internal":               Internal,
+	"unavailable":            Unavailable,
+	"data_loss":              DataLoss,
+	"unauthenticated":        Unauthenticated,
+	"too_many_requests":      TooManyRequests,
+	"internal_only_log":      InternalOnlyLog,
+	"bad_gateway":            BadGateway,
+	"org_limit_reached":      OrgLimitReached,
+	"slug_taken":             SlugTaken,
+	"retention_exceeds_plan": RetentionExceedsPlan,
+	"org_suspended":          OrgSuspended,
+	"last_org_admin":         LastOrgAdmin,
+	"cannot_modify_owner":    CannotModifyOwner,
+	"confirmation_required":  ConfirmationRequired,
+	"other_admins_exist":     OtherAdminsExist,
+	"key_expired":            KeyExpired,
 }
 
 var codeNames = map[ErrCode]string{
-	None:               "ok",
-	NoContent:          "ok_no_content",
-	Canceled:           "canceled",
-	Unknown:            "unknown",
-	InvalidArgument:    "invalid_argument",
-	DeadlineExceeded:   "deadline_exceeded",
-	NotFound:           "not_found",
-	AlreadyExists:      "already_exists",
-	PermissionDenied:   "permission_denied",
-	ResourceExhausted:  "resource_exhausted",
-	FailedPrecondition: "failed_precondition",
-	Aborted:            "aborted",
-	OutOfRange:         "out_of_range",
-	Unimplemented:      "unimplemented",
-	Internal:           "internal",
-	Unavailable:        "unavailable",
-	DataLoss:           "data_loss",
-	Unauthenticated:    "unauthenticated",
-	TooManyRequests:    "too_many_requests",
-	InternalOnlyLog:    "internal_only_log",
-	BadGateway:         "bad_gateway",
-	OrgLimitReached:    "org_limit_reached",
+	None:                 "ok",
+	NoContent:            "ok_no_content",
+	Canceled:             "canceled",
+	Unknown:              "unknown",
+	InvalidArgument:      "invalid_argument",
+	DeadlineExceeded:     "deadline_exceeded",
+	NotFound:             "not_found",
+	AlreadyExists:        "already_exists",
+	PermissionDenied:     "permission_denied",
+	ResourceExhausted:    "resource_exhausted",
+	FailedPrecondition:   "failed_precondition",
+	Aborted:              "aborted",
+	OutOfRange:           "out_of_range",
+	Unimplemented:        "unimplemented",
+	Internal:             "internal",
+	Unavailable:          "unavailable",
+	DataLoss:             "data_loss",
+	Unauthenticated:      "unauthenticated",
+	TooManyRequests:      "too_many_requests",
+	InternalOnlyLog:      "internal_only_log",
+	BadGateway:           "bad_gateway",
+	OrgLimitReached:      "org_limit_reached",
+	SlugTaken:            "slug_taken",
+	RetentionExceedsPlan: "retention_exceeds_plan",
+	OrgSuspended:         "org_suspended",
+	LastOrgAdmin:         "last_org_admin",
+	CannotModifyOwner:    "cannot_modify_owner",
+	ConfirmationRequired: "confirmation_required",
+	OtherAdminsExist:     "other_admins_exist",
+	KeyExpired:           "key_expired",
 }
 
 var httpStatus = map[ErrCode]int{
-	None:               http.StatusOK,
-	NoContent:          http.StatusNoContent,
-	Canceled:           http.StatusGatewayTimeout,
-	Unknown:            http.StatusInternalServerError,
-	InvalidArgument:    http.StatusBadRequest,
-	DeadlineExceeded:   http.StatusGatewayTimeout,
-	NotFound:           http.StatusNotFound,
-	AlreadyExists:      http.StatusConflict,
-	PermissionDenied:   http.StatusForbidden,
-	ResourceExhausted:  http.StatusTooManyRequests,
-	FailedPrecondition: http.StatusBadRequest,
-	Aborted:            http.StatusConflict,
-	OutOfRange:         http.StatusBadRequest,
-	Unimplemented:      http.StatusNotImplemented,
-	Internal:           http.StatusInternalServerError,
-	Unavailable:        http.StatusServiceUnavailable,
-	DataLoss:           http.StatusInternalServerError,
-	Unauthenticated:    http.StatusUnauthorized,
-	TooManyRequests:    http.StatusTooManyRequests,
-	InternalOnlyLog:    http.StatusInternalServerError,
-	BadGateway:         http.StatusBadGateway,
-	OrgLimitReached:    http.StatusConflict,
+	None:                 http.StatusOK,
+	NoContent:            http.StatusNoContent,
+	Canceled:             http.StatusGatewayTimeout,
+	Unknown:              http.StatusInternalServerError,
+	InvalidArgument:      http.StatusBadRequest,
+	DeadlineExceeded:     http.StatusGatewayTimeout,
+	NotFound:             http.StatusNotFound,
+	AlreadyExists:        http.StatusConflict,
+	PermissionDenied:     http.StatusForbidden,
+	ResourceExhausted:    http.StatusTooManyRequests,
+	FailedPrecondition:   http.StatusBadRequest,
+	Aborted:              http.StatusConflict,
+	OutOfRange:           http.StatusBadRequest,
+	Unimplemented:        http.StatusNotImplemented,
+	Internal:             http.StatusInternalServerError,
+	Unavailable:          http.StatusServiceUnavailable,
+	DataLoss:             http.StatusInternalServerError,
+	Unauthenticated:      http.StatusUnauthorized,
+	TooManyRequests:      http.StatusTooManyRequests,
+	InternalOnlyLog:      http.StatusInternalServerError,
+	BadGateway:           http.StatusBadGateway,
+	OrgLimitReached:      http.StatusForbidden,
+	SlugTaken:            http.StatusConflict,
+	RetentionExceedsPlan: http.StatusForbidden,
+	OrgSuspended:         http.StatusForbidden,
+	LastOrgAdmin:         http.StatusConflict,
+	CannotModifyOwner:    http.StatusConflict,
+	ConfirmationRequired: http.StatusBadRequest,
+	OtherAdminsExist:     http.StatusConflict,
+	KeyExpired:           http.StatusForbidden,
 }
