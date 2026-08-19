@@ -168,8 +168,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 		}
 		AuditExport struct {
 			// URL is the SIEM ingest endpoint. Empty disables export.
-			URL       string        `conf:"default:,env:AUDIT_EXPORT_URL"`
-			Token     string        `conf:"default:,env:AUDIT_EXPORT_TOKEN,mask"`
+			// No default tag: conf rejects an empty default value, and a string
+			// zero-values to "" anyway, which is what disables export.
+			URL       string        `conf:"env:AUDIT_EXPORT_URL"`
+			Token     string        `conf:"env:AUDIT_EXPORT_TOKEN,mask"`
 			Interval  time.Duration `conf:"default:1m"`
 			BatchSize int           `conf:"default:500"`
 			Timeout   time.Duration `conf:"default:30s"`
