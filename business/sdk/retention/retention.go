@@ -12,6 +12,7 @@ package retention
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -326,11 +327,27 @@ func nextBatch(cfg Config, spent, deleted int64) (batch int, ok bool) {
 	return batch, true
 }
 
-// repairRollup realigns log_stats_hourly after a purge. Whole hours before the
-// cutoff are dropped; the hour the cutoff falls inside is only partly deleted,
-// so it is recomputed from the rows that survived.
+// repairRollup realigns log_stats_hourly with the rows that actually survived a
+// purge.
+//
+// The watermark is the oldest surviving row, deliberately not the cutoff. Deletes
+// run strictly oldest-first and a run stops on its budget, so a partial drain
+// leaves rows behind in hours older than the cutoff. Keying the repair off the
+// cutoff dropped those hours' rollup entries while their rows were still present,
+// under-reporting by everything still waiting to drain — the mirror image of the
+// earlier bug where the repair was skipped altogether.
+//
+// Because deletion is oldest-first, the three regions are exact:
+//   - hours before the watermark hour are fully drained -> drop their rollup rows
+//   - the watermark hour is partially drained           -> recompute it
+//   - hours after it were never touched                 -> leave them alone
 func repairRollup(ctx context.Context, db *sqlx.DB, projectID uuid.UUID, sourceType string, cutoff time.Time) error {
-	boundaryStart, boundaryEnd := boundaryHour(cutoff)
+	const oldestQ = `SELECT min(ts) FROM logs WHERE project_id = $1 AND source_type = $2`
+
+	var oldest sql.NullTime
+	if err := db.GetContext(ctx, &oldest, oldestQ, projectID, sourceType); err != nil {
+		return fmt.Errorf("oldest surviving row: %w", err)
+	}
 
 	tx, err := db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -338,11 +355,30 @@ func repairRollup(ctx context.Context, db *sqlx.DB, projectID uuid.UUID, sourceT
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	const dropWholeHours = `
+	// Nothing of this source type survives, so every rollup row for it is stale.
+	if !oldest.Valid {
+		const dropAll = `
+		DELETE FROM log_stats_hourly
+		WHERE project_id = $1 AND source_type = $2`
+
+		if _, err := tx.ExecContext(ctx, dropAll, projectID, sourceType); err != nil {
+			return fmt.Errorf("drop rollup for drained source type: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit: %w", err)
+		}
+
+		return nil
+	}
+
+	boundaryStart, boundaryEnd := boundaryHour(oldest.Time)
+
+	const dropDrainedHours = `
 	DELETE FROM log_stats_hourly
 	WHERE project_id = $1 AND source_type = $2 AND hour <= $3`
 
-	if _, err := tx.ExecContext(ctx, dropWholeHours, projectID, sourceType, boundaryStart); err != nil {
+	if _, err := tx.ExecContext(ctx, dropDrainedHours, projectID, sourceType, boundaryStart); err != nil {
 		return fmt.Errorf("drop rollup hours: %w", err)
 	}
 
