@@ -512,3 +512,143 @@ DO $$ BEGIN
     END IF;
 END $$;
 CREATE INDEX IF NOT EXISTS organizations_created_by_idx ON organizations (created_by);
+-- Version: 1.27
+-- Description: Per-project hourly level rollup backing /logs/stats, timeseries and aggregate
+-- Unfiltered aggregates over logs cost ~11s on a 50M-row project. This rollup is
+-- maintained incrementally on ingest, repaired by retention, and backfilled once
+-- below (one full scan, ~36s over 50M rows).
+--
+-- The hour bucket is truncated explicitly in UTC. Plain date_trunc('hour', ts)
+-- truncates in the session TimeZone, which for non-whole-hour zones (+05:45)
+-- produces buckets that are not UTC hour boundaries.
+--
+-- source is part of the key so aggregate?groupBy=source is served from here too.
+-- That relies on source being a low-cardinality service name (13 distinct across
+-- the whole dataset when this was written); a high-cardinality source would
+-- multiply the row count of this table.
+CREATE TABLE IF NOT EXISTS log_stats_hourly (
+    project_id UUID NOT NULL,
+    hour TIMESTAMPTZ NOT NULL,
+    source_type TEXT NOT NULL,
+    source TEXT NOT NULL,
+    level TEXT NOT NULL,
+    count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT log_stats_hourly_pkey PRIMARY KEY (project_id, hour, source_type, source, level),
+    CONSTRAINT log_stats_hourly_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+INSERT INTO log_stats_hourly (project_id, hour, source_type, source, level, count)
+SELECT
+    project_id,
+    (date_trunc('hour', ts AT TIME ZONE 'UTC')) AT TIME ZONE 'UTC',
+    source_type,
+    source,
+    level,
+    count(*)
+FROM logs
+GROUP BY 1, 2, 3, 4, 5
+ON CONFLICT (project_id, hour, source_type, source, level) DO UPDATE SET count = EXCLUDED.count;
+
+-- Version: 1.28
+-- Description: Add ingest key expiry to sources for key hygiene
+-- NULL means the key never expires, preserving today's behaviour for every
+-- existing source. Revocation stays is_active = FALSE; expiry is the automatic
+-- counterpart so a leaked key stops working without an operator acting.
+ALTER TABLE sources
+ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NULL;
+CREATE INDEX IF NOT EXISTS sources_expires_at_idx ON sources (expires_at) WHERE expires_at IS NOT NULL;
+
+-- Version: 1.29
+-- Description: Per-org OIDC single sign-on configuration
+-- One IdP per org. The client secret is AES-GCM sealed with the same key that
+-- protects integration credentials, following the integrations table shape.
+-- default_role is the role a just-in-time membership receives on first SSO
+-- login; VIEWER keeps first login least-privileged.
+CREATE TABLE IF NOT EXISTS org_sso_configs (
+    org_id UUID NOT NULL,
+    issuer TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret_enc BYTEA NOT NULL,
+    client_secret_iv BYTEA NOT NULL,
+    default_role org_role NOT NULL DEFAULT 'VIEWER',
+    allowed_domains TEXT [] NOT NULL DEFAULT '{}',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT org_sso_configs_pkey PRIMARY KEY (org_id),
+    CONSTRAINT org_sso_configs_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE
+);
+
+-- Version: 1.30
+-- Description: Audit hardening — actor IP and user agent, timezone-aware timestamps
+-- A compliance log has to say where an action came from, and its timestamps have
+-- to be unambiguous. The timestamp column was created without a time zone, so
+-- existing rows are reinterpreted as UTC, which is what the application has
+-- always written (connections are opened with timezone=utc).
+ALTER TABLE audit
+ADD COLUMN IF NOT EXISTS actor_ip INET NULL,
+    ADD COLUMN IF NOT EXISTS actor_user_agent TEXT NULL;
+DO $$ BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'audit' AND column_name = 'timestamp'
+          AND data_type = 'timestamp without time zone'
+    ) THEN
+        ALTER TABLE audit
+        ALTER COLUMN timestamp TYPE TIMESTAMPTZ USING timestamp AT TIME ZONE 'UTC';
+    END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit (timestamp DESC);
+
+-- Version: 1.31
+-- Description: Cursor for audit export to an external SIEM
+-- One row. The keyset cursor (timestamp, id) is persisted so a restart resumes
+-- where it left off instead of replaying or skipping records. Delivery is
+-- at-least-once: the cursor only advances after the destination has accepted a
+-- batch, so a crash mid-batch re-sends rather than loses.
+CREATE TABLE IF NOT EXISTS audit_export_cursor (
+    singleton BOOLEAN NOT NULL DEFAULT TRUE,
+    last_timestamp TIMESTAMPTZ NOT NULL DEFAULT to_timestamp(0),
+    last_id UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT audit_export_cursor_pkey PRIMARY KEY (singleton),
+    CONSTRAINT audit_export_cursor_singleton CHECK (singleton)
+);
+INSERT INTO audit_export_cursor (singleton) VALUES (TRUE) ON CONFLICT DO NOTHING;
+
+-- Version: 1.32
+-- Description: Meter app-log ingestion (JWT /v1/ingest) and give it its own quota
+-- ingest_usage cannot hold these rows: its primary key is (source_id, day) with a
+-- NOT NULL foreign key to sources, and app logs arrive without a source. They are
+-- counted per project instead.
+--
+-- The quota is separate from infra rather than shared, matching how the plans
+-- already separate log_retention_days from infra_retention_days.
+CREATE TABLE IF NOT EXISTS app_usage (
+    project_id UUID NOT NULL,
+    org_id UUID NOT NULL,
+    day DATE NOT NULL,
+    event_count BIGINT NOT NULL DEFAULT 0,
+    byte_count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT app_usage_pkey PRIMARY KEY (project_id, day),
+    CONSTRAINT app_usage_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS app_usage_org_day_idx ON app_usage (org_id, day);
+UPDATE plans SET features = features || '{"app_daily_event_quota":1000000}'::jsonb WHERE slug = 'free';
+UPDATE plans SET features = features || '{"app_daily_event_quota":50000000}'::jsonb WHERE slug = 'pro';
+UPDATE plans SET features = features || '{"app_daily_event_quota":-1}'::jsonb WHERE slug = 'enterprise';
+
+-- Version: 1.33
+-- Description: Per-org SCIM 2.0 provisioning tokens
+-- Only the hash is stored, as with ingest keys: a database dump must not yield a
+-- usable provisioning credential. One active token per org keeps rotation simple
+-- (issuing replaces the previous one).
+CREATE TABLE IF NOT EXISTS org_scim_tokens (
+    org_id UUID NOT NULL,
+    token_hash TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NULL,
+    CONSTRAINT org_scim_tokens_pkey PRIMARY KEY (org_id),
+    CONSTRAINT org_scim_tokens_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX IF NOT EXISTS org_scim_tokens_hash_idx ON org_scim_tokens (token_hash);
