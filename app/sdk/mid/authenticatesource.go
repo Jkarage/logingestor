@@ -6,8 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jkarage/logingestor/app/sdk/errs"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -35,7 +37,7 @@ func GetSource(ctx context.Context) (sourcebus.Source, error) {
 // The source binds the request to its own org/project — ingestion handlers must
 // derive the target project from the source, never from client input, so a key
 // can only ever write to its own tenant.
-func AuthenticateSource(sourceBus sourcebus.ExtBusiness) web.MidFunc {
+func AuthenticateSource(sourceBus sourcebus.ExtBusiness, projectBus projectbus.ExtBusiness) web.MidFunc {
 	m := func(next web.HandlerFunc) web.HandlerFunc {
 		h := func(ctx context.Context, r *http.Request) web.Encoder {
 			raw, err := bearerToken(r.Header.Get("authorization"))
@@ -61,6 +63,22 @@ func AuthenticateSource(sourceBus sourcebus.ExtBusiness) web.MidFunc {
 
 			if !src.IsActive {
 				return errs.New(errs.PermissionDenied, errors.New("source is disabled"))
+			}
+
+			// An expired key is refused with a distinct code so a shipper can tell
+			// "rotate me" from "you were revoked".
+			if src.Expired(time.Now()) {
+				return errs.New(errs.KeyExpired, errors.New("ingest key has expired; rotate it to continue"))
+			}
+
+			// A suspended organization accepts no new logs. Alerts are driven by
+			// ingestion, so stopping here stops those too.
+			enabled, err := projectBus.OrgEnabled(ctx, src.ProjectID)
+			if err != nil {
+				return errs.Errorf(errs.Internal, "orgenabled: projectID[%s]: %s", src.ProjectID, err)
+			}
+			if !enabled {
+				return errs.New(errs.OrgSuspended, errors.New("organization is suspended"))
 			}
 
 			ctx = setSource(ctx, src)

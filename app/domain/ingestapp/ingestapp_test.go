@@ -16,6 +16,7 @@ import (
 	"github.com/jkarage/logingestor/app/domain/ingestapp"
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -63,15 +64,31 @@ func (f *fakeLogBus) BulkCreate(_ context.Context, entries []logbus.NewLog) ([]l
 	return logs, nil
 }
 
+// fakeProjectBus reports whether the source's org is enabled; only OrgEnabled
+// is exercised by the ingest middleware.
+type fakeProjectBus struct {
+	projectbus.ExtBusiness
+	orgSuspended bool
+}
+
+func (f fakeProjectBus) OrgEnabled(context.Context, uuid.UUID) (bool, error) {
+	return !f.orgSuspended, nil
+}
+
 func newTestServer(t *testing.T, srcBus sourcebus.ExtBusiness, logBus logbus.ExtBusiness) *httptest.Server {
+	return newTestServerWithProjects(t, srcBus, logBus, fakeProjectBus{})
+}
+
+func newTestServerWithProjects(t *testing.T, srcBus sourcebus.ExtBusiness, logBus logbus.ExtBusiness, projBus projectbus.ExtBusiness) *httptest.Server {
 	t.Helper()
 	lg := logger.New(io.Discard, logger.LevelError, "TEST", nil)
 	app := web.NewApp(lg.Info, nil)
 	ingestapp.Routes(app, ingestapp.Config{
-		Log:       lg,
-		LogBus:    logBus,
-		SourceBus: srcBus,
-		Hub:       logapp.NewHub(),
+		Log:        lg,
+		LogBus:     logBus,
+		SourceBus:  srcBus,
+		ProjectBus: projBus,
+		Hub:        logapp.NewHub(),
 	})
 	srv := httptest.NewServer(app)
 	t.Cleanup(srv.Close)
@@ -274,4 +291,126 @@ func doPostBytes(t *testing.T, srv *httptest.Server, path, contentType, key stri
 		t.Fatal(err)
 	}
 	return resp
+}
+
+// A deactivated organization must stop accepting logs. Before this gate existed,
+// PUT /orgs/{id} {enabled:false} changed a column and nothing else — ingestion
+// (and therefore alerting, which is driven by ingestion) carried on.
+func Test_bulk_SuspendedOrg_Rejected(t *testing.T) {
+	src, rawKey := activeSource()
+	logBus := &fakeLogBus{}
+	srv := newTestServerWithProjects(t, fakeSourceBus{src: src}, logBus, fakeProjectBus{orgSuspended: true})
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/ingest/bulk",
+		strings.NewReader(`{"message":"should not land","level":"error"}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "org_suspended") {
+		t.Errorf("body %q should carry the stable org_suspended code", body)
+	}
+
+	if len(logBus.created) != 0 {
+		t.Errorf("%d logs were written for a suspended org, want 0", len(logBus.created))
+	}
+}
+
+// The same source on an enabled org still works, so the gate is not just
+// rejecting everything.
+func Test_bulk_EnabledOrg_Accepted(t *testing.T) {
+	src, rawKey := activeSource()
+	logBus := &fakeLogBus{}
+	srv := newTestServerWithProjects(t, fakeSourceBus{src: src}, logBus, fakeProjectBus{orgSuspended: false})
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/ingest/bulk",
+		strings.NewReader(`{"message":"should land","level":"error"}`))
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		t.Errorf("status = %d, want 2xx", resp.StatusCode)
+	}
+	if len(logBus.created) == 0 {
+		t.Error("no logs written for an enabled org")
+	}
+}
+
+// An expired ingest key must stop working on its own, with a code distinct from
+// revocation so a shipper can tell "rotate me" from "you were turned off".
+func Test_bulk_ExpiredKey_Rejected(t *testing.T) {
+	src, rawKey := activeSource()
+	expired := time.Now().Add(-time.Hour)
+	src.ExpiresAt = &expired
+
+	logBus := &fakeLogBus{}
+	srv := newTestServer(t, fakeSourceBus{src: src}, logBus)
+
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/ingest/bulk",
+		strings.NewReader(`{"message":"stale key","level":"error"}`))
+	req.Header.Set("Authorization", "Bearer "+rawKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "key_expired") {
+		t.Errorf("body %q should carry the stable key_expired code", body)
+	}
+	if len(logBus.created) != 0 {
+		t.Errorf("%d logs written for an expired key, want 0", len(logBus.created))
+	}
+}
+
+// A key with a future expiry, and one with none, both still ingest.
+func Test_bulk_UnexpiredKeys_Accepted(t *testing.T) {
+	future := time.Now().Add(24 * time.Hour)
+
+	for name, exp := range map[string]*time.Time{"no expiry": nil, "future expiry": &future} {
+		t.Run(name, func(t *testing.T) {
+			src, rawKey := activeSource()
+			src.ExpiresAt = exp
+
+			logBus := &fakeLogBus{}
+			srv := newTestServer(t, fakeSourceBus{src: src}, logBus)
+
+			req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/ingest/bulk",
+				strings.NewReader(`{"message":"ok","level":"error"}`))
+			req.Header.Set("Authorization", "Bearer "+rawKey)
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("post: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if len(logBus.created) == 0 {
+				t.Errorf("status %d: no logs written", resp.StatusCode)
+			}
+		})
+	}
 }

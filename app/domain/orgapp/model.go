@@ -14,11 +14,19 @@ import (
 
 // Org represents an organization returned by the API.
 type Org struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	Enabled     bool   `json:"enabled"`
-	CreatedBy   string `json:"createdBy,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Slug      string `json:"slug"`
+	Enabled   bool   `json:"enabled"`
+	CreatedBy string `json:"createdBy,omitempty"`
+
+	// Role is the caller's role in this org. Only set where the handler knows it
+	// (e.g. the creator of a new org is always ORG ADMIN).
+	Role string `json:"role,omitempty"`
+
+	// CreatedAt is the canonical name; DateCreated/DateUpdated are retained for
+	// existing clients.
+	CreatedAt   string `json:"createdAt"`
 	DateCreated string `json:"dateCreated"`
 	DateUpdated string `json:"dateUpdated"`
 }
@@ -41,6 +49,7 @@ func toAppOrg(bus orgbus.Org) Org {
 		Slug:        bus.Slug,
 		Enabled:     bus.Enabled,
 		CreatedBy:   createdBy,
+		CreatedAt:   bus.DateCreated.Format(time.RFC3339),
 		DateCreated: bus.DateCreated.Format(time.RFC3339),
 		DateUpdated: bus.DateUpdated.Format(time.RFC3339),
 	}
