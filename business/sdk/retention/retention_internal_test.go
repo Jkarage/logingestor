@@ -89,3 +89,74 @@ func Test_Result_Total(t *testing.T) {
 		t.Errorf("Total() = %d, want 7", r.Total())
 	}
 }
+
+func Test_nextBatch(t *testing.T) {
+	cases := []struct {
+		name      string
+		cfg       Config
+		spent     int64
+		deleted   int64
+		wantBatch int
+		wantOK    bool
+	}{
+		{
+			name:      "no row budget uses the full batch",
+			cfg:       Config{BatchSize: 10_000},
+			wantBatch: 10_000,
+			wantOK:    true,
+		},
+		{
+			name:      "budget with room to spare uses the full batch",
+			cfg:       Config{BatchSize: 10_000, MaxRows: 100_000},
+			spent:     50_000,
+			wantBatch: 10_000,
+			wantOK:    true,
+		},
+		{
+			// The last batch is trimmed so a run cannot overshoot MaxRows.
+			name:      "budget nearly spent trims the batch",
+			cfg:       Config{BatchSize: 10_000, MaxRows: 100_000},
+			spent:     95_000,
+			wantBatch: 5_000,
+			wantOK:    true,
+		},
+		{
+			name:      "spend counted across projects and within this one",
+			cfg:       Config{BatchSize: 10_000, MaxRows: 100_000},
+			spent:     90_000,
+			deleted:   7_000,
+			wantBatch: 3_000,
+			wantOK:    true,
+		},
+		{
+			// This is the stop signal. The caller must still repair the rollup for
+			// rows already deleted; skipping it left stats over-reporting.
+			name:   "budget exactly spent stops",
+			cfg:    Config{BatchSize: 10_000, MaxRows: 100_000},
+			spent:  100_000,
+			wantOK: false,
+		},
+		{
+			name:    "budget overshot stops",
+			cfg:     Config{BatchSize: 10_000, MaxRows: 100_000},
+			spent:   99_000,
+			deleted: 5_000,
+			wantOK:  false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			batch, ok := nextBatch(c.cfg, c.spent, c.deleted)
+			if ok != c.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
+			}
+			if ok && batch != c.wantBatch {
+				t.Errorf("batch = %d, want %d", batch, c.wantBatch)
+			}
+			if ok && batch <= 0 {
+				t.Error("a usable batch must be positive or the loop cannot progress")
+			}
+		})
+	}
+}

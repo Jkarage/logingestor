@@ -224,13 +224,43 @@ func purgeAudit(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config
 	return deleted, nil
 }
 
-// purge deletes one project's expired rows of a single source type, in batches,
-// then repairs the rollup. spent is the row count already used by this run.
+// purge deletes one project's expired rows of a single source type and realigns
+// the rollup. spent is the row count already used by this run.
+//
+// The repair runs on every path that deleted anything, including a budget or
+// deadline stop. An earlier version returned early from the batch loop without
+// repairing, which left log_stats_hourly counting rows that no longer existed —
+// so /logs/stats over-reported by the size of the drain.
 func purge(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config, projectID uuid.UUID, sourceType string, days int, spent int64, deadline time.Time) (int64, bool, error) {
 	// Cutoff is computed here rather than in SQL so the same instant drives both
 	// the delete and the rollup repair.
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 
+	deleted, incomplete, err := deleteExpired(ctx, db, cfg, projectID, sourceType, cutoff, spent, deadline)
+
+	// Repair before surfacing any error: rows are already gone, and leaving the
+	// rollup ahead of them is worse than the error itself.
+	if deleted > 0 {
+		if rerr := repairRollup(ctx, db, projectID, sourceType, cutoff); rerr != nil {
+			if err == nil {
+				err = rerr
+			} else {
+				log.Error(ctx, "retention: rollup repair failed after a delete error",
+					"projectID", projectID, "source_type", sourceType, "msg", rerr)
+			}
+		}
+
+		log.Info(ctx, "retention purged", "projectID", projectID, "source_type", sourceType,
+			"days", days, "deleted", deleted, "incomplete", incomplete)
+	}
+
+	return deleted, incomplete, err
+}
+
+// deleteExpired removes rows older than cutoff in bounded batches. It reports
+// incomplete when it stopped on the run's budget rather than running out of
+// rows, and never touches the rollup — purge owns that.
+func deleteExpired(ctx context.Context, db *sqlx.DB, cfg Config, projectID uuid.UUID, sourceType string, cutoff time.Time, spent int64, deadline time.Time) (int64, bool, error) {
 	const deleteQ = `
 	DELETE FROM logs
 	WHERE id IN (
@@ -243,22 +273,16 @@ func purge(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config, pro
 	var deleted int64
 
 	for {
-		if err := ctx.Err(); err != nil {
+		if ctx.Err() != nil {
 			return deleted, true, nil
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return deleted, true, nil
 		}
 
-		batch := cfg.BatchSize
-		if cfg.MaxRows > 0 {
-			remaining := int64(cfg.MaxRows) - (spent + deleted)
-			if remaining <= 0 {
-				return deleted, true, nil
-			}
-			if remaining < int64(batch) {
-				batch = int(remaining)
-			}
+		batch, ok := nextBatch(cfg, spent, deleted)
+		if !ok {
+			return deleted, true, nil
 		}
 
 		r, err := db.ExecContext(ctx, deleteQ, projectID, sourceType, cutoff, batch)
@@ -275,18 +299,31 @@ func purge(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config, pro
 
 		// A short batch means this project/source type is drained.
 		if n < int64(batch) {
-			break
+			return deleted, false, nil
 		}
 	}
+}
 
-	if deleted > 0 {
-		if err := repairRollup(ctx, db, projectID, sourceType, cutoff); err != nil {
-			return deleted, false, err
-		}
-		log.Info(ctx, "retention purged", "projectID", projectID, "source_type", sourceType, "days", days, "deleted", deleted)
+// nextBatch returns the batch size for the next delete, trimmed so the run does
+// not exceed its row budget. ok is false when the budget is spent, which is the
+// signal to stop — and historically the point where the rollup repair was
+// skipped, so the caller must still repair whatever it already deleted.
+func nextBatch(cfg Config, spent, deleted int64) (batch int, ok bool) {
+	batch = cfg.BatchSize
+
+	if cfg.MaxRows <= 0 {
+		return batch, true
 	}
 
-	return deleted, false, nil
+	remaining := int64(cfg.MaxRows) - (spent + deleted)
+	if remaining <= 0 {
+		return 0, false
+	}
+	if remaining < int64(batch) {
+		batch = int(remaining)
+	}
+
+	return batch, true
 }
 
 // repairRollup realigns log_stats_hourly after a purge. Whole hours before the
