@@ -11,7 +11,10 @@ import (
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/app/domain/orgapp"
 	"github.com/jkarage/logingestor/app/domain/projectapp"
+	"github.com/jkarage/logingestor/app/domain/scimapp"
 	"github.com/jkarage/logingestor/app/domain/sourceapp"
+	"github.com/jkarage/logingestor/app/domain/ssoapp"
+	"github.com/jkarage/logingestor/app/domain/usageapp"
 	"github.com/jkarage/logingestor/app/domain/userapp"
 	"github.com/jkarage/logingestor/app/sdk/mux"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -90,6 +93,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AnalyzeBus:     cfg.BusConfig.AnalyzeBus,
 		Hub:            cfg.LogHub,
 		AllowedOrigins: cfg.AllowedOrigins,
+		UsageBus:       cfg.BusConfig.UsageBus,
 	})
 
 	sourceapp.Routes(app, sourceapp.Config{
@@ -103,11 +107,42 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	})
 
 	ingestapp.Routes(app, ingestapp.Config{
-		Log:       cfg.Log,
-		LogBus:    cfg.BusConfig.LogBus,
-		SourceBus: cfg.BusConfig.SourceBus,
-		UsageBus:  cfg.BusConfig.UsageBus,
-		Hub:       cfg.LogHub,
+		Log:        cfg.Log,
+		LogBus:     cfg.BusConfig.LogBus,
+		SourceBus:  cfg.BusConfig.SourceBus,
+		ProjectBus: cfg.BusConfig.ProjectBus,
+		UsageBus:   cfg.BusConfig.UsageBus,
+		Hub:        cfg.LogHub,
+	})
+
+	usageapp.Routes(app, usageapp.Config{
+		Log:        cfg.Log,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+		UsageBus:   cfg.BusConfig.UsageBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
+	})
+
+	scimapp.Routes(app, scimapp.Config{
+		Log:          cfg.Log,
+		SCIMBus:      cfg.BusConfig.SCIMBus,
+		OrgBus:       cfg.BusConfig.OrgBus,
+		UserBus:      cfg.BusConfig.UserBus,
+		DefaultRoles: scimapp.SSODefaultRole{SSOBus: cfg.BusConfig.SSOBus},
+		BaseURL:      cfg.SCIMBaseURL,
+	})
+
+	ssoapp.Routes(app, ssoapp.Config{
+		Log:                  cfg.Log,
+		Auth:                 cfg.AuthConfig.Auth,
+		AuthClient:           cfg.IngestorConfig.AuthClient,
+		SSOBus:               cfg.BusConfig.SSOBus,
+		SCIMBus:              cfg.BusConfig.SCIMBus,
+		OrgBus:               cfg.BusConfig.OrgBus,
+		UserBus:              cfg.BusConfig.UserBus,
+		SigningKey:           cfg.SigningKey,
+		CallbackURL:          cfg.SSOConfig.CallbackURL,
+		CompleteURL:          cfg.SSOConfig.CompleteURL,
+		RequireVerifiedEmail: cfg.SSOConfig.RequireVerifiedEmail,
 	})
 
 	contactapp.Routes(app, contactapp.Config{

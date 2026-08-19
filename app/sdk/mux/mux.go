@@ -17,7 +17,9 @@ import (
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/scimbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
+	"github.com/jkarage/logingestor/business/domain/ssobus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	emailer "github.com/jkarage/logingestor/foundation/email"
@@ -81,6 +83,15 @@ type BusConfig struct {
 	AnalyzeBus     *analyzebus.Business
 	SourceBus      sourcebus.ExtBusiness
 	UsageBus       usagebus.ExtBusiness
+	SSOBus         *ssobus.Business
+	SCIMBus        *scimbus.Business
+}
+
+// SSOConfig contains single sign-on endpoint configuration.
+type SSOConfig struct {
+	CallbackURL          string
+	CompleteURL          string
+	RequireVerifiedEmail bool
 }
 
 // BillingConfig contains Stripe billing configuration.
@@ -100,10 +111,12 @@ type Config struct {
 	IngestorConfig IngestorConfig
 	AuthConfig     AuthConfig
 	BillingConfig  BillingConfig
+	SSOConfig      SSOConfig
 	EmailConfig    *emailer.Config
 	EmailBaseURL   string
 	SupportEmail   string
 	SigningKey     string
+	SCIMBaseURL    string
 	LogHub         *logapp.Hub
 	AllowedOrigins []string
 }

@@ -15,6 +15,7 @@ import (
 	"encoding/hex"
 
 	"github.com/ardanlabs/conf/v3"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/jkarage/logingestor/api/services/ingestor/build"
 	"github.com/jkarage/logingestor/app/domain/logapp"
@@ -45,10 +46,14 @@ import (
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectaudit"
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectotel"
 	"github.com/jkarage/logingestor/business/domain/projectbus/stores/projectdb"
+	"github.com/jkarage/logingestor/business/domain/scimbus"
+	"github.com/jkarage/logingestor/business/domain/scimbus/stores/scimdb"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus/extensions/sourceaudit"
 	"github.com/jkarage/logingestor/business/domain/sourcebus/extensions/sourceotel"
 	"github.com/jkarage/logingestor/business/domain/sourcebus/stores/sourcedb"
+	"github.com/jkarage/logingestor/business/domain/ssobus"
+	"github.com/jkarage/logingestor/business/domain/ssobus/stores/ssodb"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/domain/usagebus/stores/usagedb"
 	"github.com/jkarage/logingestor/business/domain/userbus"
@@ -56,6 +61,8 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/usercache"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
+	"github.com/jkarage/logingestor/business/sdk/auditexport"
+	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
 	emailer "github.com/jkarage/logingestor/foundation/email"
@@ -119,6 +126,20 @@ func run(ctx context.Context, log *logger.Logger) error {
 			ConnMaxLifetime time.Duration `conf:"default:2m"`
 			ConnMaxIdleTime time.Duration `conf:"default:1m"`
 		}
+		Retention struct {
+			// The worker exists because retention was previously a manual admin
+			// command that nobody ran, letting one project reach 50M rows.
+			Enabled    bool          `conf:"default:true"`
+			Interval   time.Duration `conf:"default:1h"`
+			StartDelay time.Duration `conf:"default:5m"`
+			BatchSize  int           `conf:"default:10000"`
+			MaxRows    int           `conf:"default:2000000"`
+			MaxRuntime time.Duration `conf:"default:10m"`
+
+			// AuditDays defaults to -1 (keep forever): audit is a compliance
+			// surface, so ageing it out is an explicit choice.
+			AuditDays int `conf:"default:-1"`
+		}
 		Auth struct {
 			Host       string `conf:"default:http://localhost:6000"`
 			KeysFolder string `conf:"default:zarf/keys/"`
@@ -144,6 +165,31 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// EncryptionKey must be a 64-character hex string (32 bytes → AES-256).
 			// Generate with: openssl rand -hex 32
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
+		}
+		AuditExport struct {
+			// URL is the SIEM ingest endpoint. Empty disables export.
+			URL       string        `conf:"default:,env:AUDIT_EXPORT_URL"`
+			Token     string        `conf:"default:,env:AUDIT_EXPORT_TOKEN,mask"`
+			Interval  time.Duration `conf:"default:1m"`
+			BatchSize int           `conf:"default:500"`
+			Timeout   time.Duration `conf:"default:30s"`
+		}
+		SSO struct {
+			// CallbackURL must be registered as a redirect URI with every
+			// configured identity provider.
+			CallbackURL string `conf:"default:http://localhost:3002/v1/auth/sso/callback,env:SSO_CALLBACK_URL"`
+
+			// CompleteURL is the frontend route the browser lands on afterwards.
+			CompleteURL string `conf:"default:http://localhost:3000/sso/complete,env:SSO_COMPLETE_URL"`
+
+			// RequireVerifiedEmail rejects identities whose email_verified claim is
+			// not true. Turning this off allows an IdP that lets users self-assert
+			// an address to take over an existing account.
+			RequireVerifiedEmail bool `conf:"default:true,env:SSO_REQUIRE_VERIFIED_EMAIL"`
+
+			// SCIMBaseURL is this SCIM service's public root, used to build
+			// resource Location values that IdPs follow back.
+			SCIMBaseURL string `conf:"default:http://localhost:3002/v1/scim/v2,env:SCIM_BASE_URL"`
 		}
 		AI struct {
 			CerebriumAPIKey  string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_API_KEY,mask"`
@@ -308,6 +354,18 @@ func run(ctx context.Context, log *logger.Logger) error {
 	integrationStorage := integrationdb.NewStore(log, db, encKey)
 	integrationBus := integrationbus.NewBusiness(log, integrationStorage, integrationCallers)
 
+	// SSO provider configuration reuses the integration encryption key to seal
+	// each org's OIDC client secret at rest.
+	ssoStorage, err := ssodb.NewStore(log, db, encKey)
+	if err != nil {
+		return fmt.Errorf("sso store: %w", err)
+	}
+	ssoBus := ssobus.NewBusiness(log, ssoStorage)
+
+	// SCIM provisioning tokens are hashed, not encrypted: they are only ever
+	// compared, never recovered.
+	scimBus := scimbus.NewBusiness(log, scimdb.NewStore(log, db))
+
 	logOtelExt := logotel.NewExtension()
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
@@ -334,6 +392,49 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}()
 
 	// -------------------------------------------------------------------------
+	// Start Retention Worker
+
+	retentionCtx, stopRetention := context.WithCancel(ctx)
+	defer stopRetention()
+
+	if cfg.Retention.Enabled {
+		retentionCfg := retention.Config{
+			BatchSize:  cfg.Retention.BatchSize,
+			MaxRows:    cfg.Retention.MaxRows,
+			MaxRuntime: cfg.Retention.MaxRuntime,
+			AuditDays:  cfg.Retention.AuditDays,
+		}
+
+		log.Info(ctx, "startup", "status", "retention worker started",
+			"interval", cfg.Retention.Interval.String(),
+			"start_delay", cfg.Retention.StartDelay.String(),
+			"max_rows_per_run", cfg.Retention.MaxRows)
+
+		go runRetention(retentionCtx, log, db, retentionCfg, cfg.Retention.Interval, cfg.Retention.StartDelay)
+	} else {
+		log.Info(ctx, "startup", "status", "retention worker disabled")
+	}
+
+	// -------------------------------------------------------------------------
+	// Start Audit Export Worker
+
+	auditExportCfg := auditexport.Config{
+		URL:       cfg.AuditExport.URL,
+		Token:     cfg.AuditExport.Token,
+		BatchSize: cfg.AuditExport.BatchSize,
+		Timeout:   cfg.AuditExport.Timeout,
+	}
+
+	if auditExportCfg.Enabled() {
+		log.Info(ctx, "startup", "status", "audit export worker started",
+			"interval", cfg.AuditExport.Interval.String(), "batch_size", cfg.AuditExport.BatchSize)
+
+		go runAuditExport(retentionCtx, log, db, auditExportCfg, cfg.AuditExport.Interval)
+	} else {
+		log.Info(ctx, "startup", "status", "audit export disabled (no AUDIT_EXPORT_URL)")
+	}
+
+	// -------------------------------------------------------------------------
 	// Start API Service
 	log.Info(ctx, "startup", "status", "initializing V1 API support")
 
@@ -355,6 +456,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			AnalyzeBus:     analyzeBus,
 			SourceBus:      sourceBus,
 			UsageBus:       usageBus,
+			SSOBus:         ssoBus,
+			SCIMBus:        scimBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,
@@ -367,10 +470,15 @@ func run(ctx context.Context, log *logger.Logger) error {
 			StripeWebhookSecret: cfg.Stripe.WebhookSecret,
 			AppBaseURL:          cfg.Stripe.AppBaseURL,
 		},
-		EmailConfig:    em,
-		EmailBaseURL:   cfg.Resend.EmailBaseURL,
-		SupportEmail:   cfg.Resend.SupportEmail,
-		SigningKey:     cfg.Auth.ActiveKID,
+		EmailConfig:  em,
+		EmailBaseURL: cfg.Resend.EmailBaseURL,
+		SupportEmail: cfg.Resend.SupportEmail,
+		SigningKey:   cfg.Auth.ActiveKID,
+		SSOConfig: mux.SSOConfig{
+			CallbackURL:          cfg.SSO.CallbackURL,
+			CompleteURL:          cfg.SSO.CompleteURL,
+			RequireVerifiedEmail: cfg.SSO.RequireVerifiedEmail,
+		},
 		LogHub:         hub,
 		AllowedOrigins: cfg.Web.CORSAllowedOrigins,
 	}
@@ -418,4 +526,74 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}
 
 	return nil
+}
+
+// runRetention drives the retention pass on an interval until ctx is cancelled.
+//
+// This deployment runs a single API instance, so an in-process ticker is
+// sufficient and needs no leader election. If the service is ever scaled out,
+// every replica would run its own pass concurrently — at that point move this to
+// a single CronJob invoking `admin retention`, or add an advisory lock.
+func runRetention(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg retention.Config, interval, startDelay time.Duration) {
+	// Let the API finish coming up before competing for the database.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(startDelay):
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		res, err := retention.Run(ctx, log, db, cfg)
+		switch {
+		case err != nil && ctx.Err() != nil:
+			// Shutting down; the partial pass resumes on the next boot.
+			return
+		case err != nil:
+			log.Error(ctx, "retention run failed", "msg", err)
+		case res.Incomplete:
+			// Budget spent with rows still expired: come back promptly rather
+			// than waiting a full interval, so a large backlog drains steadily.
+			log.Info(ctx, "retention incomplete, rescheduling early", "deleted", res.Total())
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+			continue
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// runAuditExport ships audit records to the configured SIEM on an interval until
+// ctx is cancelled. A failed run is logged and retried on the next tick; the
+// cursor does not advance past an undelivered batch, so nothing is skipped.
+func runAuditExport(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg auditexport.Config, interval time.Duration) {
+	exporter := auditexport.New(log, db, cfg)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		if _, err := exporter.Run(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error(ctx, "audit export failed", "msg", err)
+		}
+	}
 }
