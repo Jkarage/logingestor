@@ -54,6 +54,16 @@ type Source struct {
 	RateLimitBurst  int
 	SampleDebugInfo float64
 	CreatedAt       time.Time
+
+	// ExpiresAt is when the ingest key stops being accepted. Nil means it never
+	// expires. Revocation is IsActive = false; expiry is the automatic
+	// counterpart so a leaked key lapses without an operator intervening.
+	ExpiresAt *time.Time
+}
+
+// Expired reports whether the key has passed its expiry as of now.
+func (s Source) Expired(now time.Time) bool {
+	return s.ExpiresAt != nil && now.After(*s.ExpiresAt)
 }
 
 // NewSource contains the data needed to create a source.
@@ -62,4 +72,7 @@ type NewSource struct {
 	ProjectID uuid.UUID
 	Kind      string
 	Name      string
+
+	// ExpiresAt optionally bounds the lifetime of the generated key.
+	ExpiresAt *time.Time
 }

@@ -13,6 +13,10 @@ type NewSource struct {
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
 	ProjectID string `json:"projectId"`
+
+	// ExpiresInDays optionally bounds the key's lifetime. Omitted or 0 means the
+	// key never expires, which is the pre-existing behaviour.
+	ExpiresInDays int `json:"expiresInDays"`
 }
 
 // Decode implements the web.Decoder interface.
@@ -31,6 +35,9 @@ type SourceCreated struct {
 	CreatedAt string `json:"createdAt"`
 	IngestKey string `json:"ingestKey"`
 	KeyPrefix string `json:"keyPrefix"`
+
+	// ExpiresAt is nil when the key never expires.
+	ExpiresAt *string `json:"expiresAt"`
 }
 
 // Encode implements the web.Encoder interface.
@@ -52,6 +59,11 @@ type Source struct {
 	KeyPrefix  string  `json:"keyPrefix"`
 	LastSeenAt *string `json:"lastSeenAt"`
 	CreatedAt  string  `json:"createdAt"`
+
+	// ExpiresAt is nil when the key never expires. Expired is derived so a
+	// client does not have to compare clocks to render key health.
+	ExpiresAt *string `json:"expiresAt"`
+	Expired   bool    `json:"expired"`
 }
 
 // Sources is the list response shape: { "sources": [ ... ] }.
@@ -102,6 +114,12 @@ func toAppSource(bus sourcebus.Source) Source {
 		ls := bus.LastSeenAt.Format(time.RFC3339)
 		s.LastSeenAt = &ls
 	}
+	if bus.ExpiresAt != nil {
+		v := bus.ExpiresAt.Format(time.RFC3339)
+		s.ExpiresAt = &v
+	}
+	s.Expired = bus.Expired(time.Now())
+
 	return s
 }
 

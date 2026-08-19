@@ -83,6 +83,7 @@ func (b *Business) Create(ctx context.Context, actorID uuid.UUID, ns NewSource) 
 		RateLimitBurst:  DefaultRateLimitBurst,
 		SampleDebugInfo: DefaultSampleDebugInfo,
 		CreatedAt:       time.Now(),
+		ExpiresAt:       ns.ExpiresAt,
 	}
 
 	if err := b.storer.Create(ctx, source); err != nil {

@@ -23,6 +23,7 @@ type sourceDB struct {
 	RateLimitBurst  int          `db:"rate_limit_burst"`
 	SampleDebugInfo float64      `db:"sample_debug_info"`
 	CreatedAt       time.Time    `db:"created_at"`
+	ExpiresAt       sql.NullTime `db:"expires_at"`
 }
 
 func toDBSource(bus sourcebus.Source) sourceDB {
@@ -42,6 +43,9 @@ func toDBSource(bus sourcebus.Source) sourceDB {
 	}
 	if bus.LastSeenAt != nil {
 		db.LastSeenAt = sql.NullTime{Time: bus.LastSeenAt.UTC(), Valid: true}
+	}
+	if bus.ExpiresAt != nil {
+		db.ExpiresAt = sql.NullTime{Time: bus.ExpiresAt.UTC(), Valid: true}
 	}
 	return db
 }
@@ -64,6 +68,10 @@ func toBusSource(db sourceDB) sourcebus.Source {
 	if db.LastSeenAt.Valid {
 		t := db.LastSeenAt.Time.In(time.Local)
 		src.LastSeenAt = &t
+	}
+	if db.ExpiresAt.Valid {
+		t := db.ExpiresAt.Time.In(time.Local)
+		src.ExpiresAt = &t
 	}
 	return src
 }

@@ -17,7 +17,7 @@ import (
 // sourceColumns is the shared SELECT column list; must match sourceDB db tags.
 const sourceColumns = `id, org_id, project_id, kind, name, key_prefix, key_hash,
 	is_active, last_seen_at, rate_limit_per_sec, rate_limit_burst,
-	sample_debug_info, created_at`
+	sample_debug_info, created_at, expires_at`
 
 // Store manages the set of APIs for source database access.
 type Store struct {
@@ -35,10 +35,12 @@ func (s *Store) Create(ctx context.Context, source sourcebus.Source) error {
 	const q = `
 	INSERT INTO sources
 		(id, org_id, project_id, kind, name, key_prefix, key_hash, is_active,
-		 last_seen_at, rate_limit_per_sec, rate_limit_burst, sample_debug_info, created_at)
+		 last_seen_at, rate_limit_per_sec, rate_limit_burst, sample_debug_info, created_at,
+		 expires_at)
 	VALUES
 		(:id, :org_id, :project_id, :kind, :name, :key_prefix, :key_hash, :is_active,
-		 :last_seen_at, :rate_limit_per_sec, :rate_limit_burst, :sample_debug_info, :created_at)`
+		 :last_seen_at, :rate_limit_per_sec, :rate_limit_burst, :sample_debug_info, :created_at,
+		 :expires_at)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBSource(source)); err != nil {
 		if errors.Is(err, sqldb.ErrDBDuplicatedEntry) {

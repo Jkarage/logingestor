@@ -67,11 +67,22 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.NotFound, errors.New("project not found in org"))
 	}
 
+	if ns.ExpiresInDays < 0 {
+		return errs.New(errs.InvalidArgument, errors.New("expiresInDays must be zero (never expires) or positive"))
+	}
+
+	var expiresAt *time.Time
+	if ns.ExpiresInDays > 0 {
+		t := time.Now().UTC().AddDate(0, 0, ns.ExpiresInDays)
+		expiresAt = &t
+	}
+
 	source, rawKey, err := a.sourceBus.Create(ctx, mid.GetSubjectID(ctx), sourcebus.NewSource{
 		OrgID:     orgID,
 		ProjectID: projectID,
 		Kind:      ns.Kind,
 		Name:      ns.Name,
+		ExpiresAt: expiresAt,
 	})
 	if err != nil {
 		if errors.Is(err, sourcebus.ErrDuplicateName) {
@@ -83,7 +94,7 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "create: %s", err)
 	}
 
-	return SourceCreated{
+	created := SourceCreated{
 		ID:        source.ID.String(),
 		Kind:      source.Kind,
 		Name:      source.Name,
@@ -93,6 +104,13 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		IngestKey: rawKey,
 		KeyPrefix: source.KeyPrefix,
 	}
+
+	if source.ExpiresAt != nil {
+		v := source.ExpiresAt.Format(time.RFC3339)
+		created.ExpiresAt = &v
+	}
+
+	return created
 }
 
 // query handles GET /v1/orgs/{org_id}/sources.
