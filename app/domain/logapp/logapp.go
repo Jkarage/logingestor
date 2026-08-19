@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -217,17 +218,28 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		filter.SourceType = st
 	}
 
-	if lvlStr := q.Get("level"); lvlStr != "" {
+	// level is repeatable and also accepts a comma-separated list, so
+	// ?level=WARN&level=ERROR and ?level=WARN,ERROR are equivalent.
+	for _, lvlStr := range csvValues(q["level"]) {
 		lvl, err := logbus.ParseLevel(lvlStr)
 		if err != nil {
 			return errs.New(errs.InvalidArgument, err)
 		}
-		filter.Level = &lvl
+		filter.Levels = append(filter.Levels, lvl)
 	}
 
-	if search := q.Get("search"); search != "" {
+	// q is the documented name for free-text search; search is the original and
+	// stays accepted so existing callers keep working.
+	if search := firstNonEmpty(q.Get("q"), q.Get("search")); search != "" {
 		filter.Search = &search
 	}
+
+	if source := strings.TrimSpace(q.Get("source")); source != "" {
+		filter.Source = &source
+	}
+
+	// tag is repeatable and comma-separated; every tag given must be present.
+	filter.Tags = csvValues(q["tag"])
 
 	if fromStr := q.Get("from"); fromStr != "" {
 		t, err := time.Parse(time.RFC3339, fromStr)
@@ -275,6 +287,9 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 
 	result, err := a.logBus.Query(ctx, filter, limit, cursor)
 	if err != nil {
+		if errors.Is(err, logbus.ErrWindowTooWide) {
+			return errs.New(errs.InvalidArgument, err)
+		}
 		return errs.Errorf(errs.Internal, "query: %s", err)
 	}
 
@@ -518,4 +533,31 @@ func (a *app) recordAppUsage(ctx context.Context, logs []logbus.Log, orgByProjec
 			}
 		}
 	}()
+}
+
+// csvValues flattens repeated query parameters that may also carry
+// comma-separated lists, trimming blanks. ?tag=a&tag=b,c yields [a b c].
+func csvValues(raw []string) []string {
+	var out []string
+
+	for _, v := range raw {
+		for _, part := range strings.Split(v, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				out = append(out, part)
+			}
+		}
+	}
+
+	return out
+}
+
+// firstNonEmpty returns the first non-blank value, so a parameter can have an
+// alias without the caller needing to know which one won.
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }

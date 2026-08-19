@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
+	"github.com/jkarage/logingestor/business/sdk/sqldb/dbarray"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jmoiron/sqlx"
 )
@@ -282,16 +283,37 @@ func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUI
 		writeWhere(countBuf, "source_type = :source_type")
 	}
 
-	if filter.Level != nil {
-		data["level"] = filter.Level.String()
-		writeWhere(dataBuf, "level = :level")
-		writeWhere(countBuf, "level = :level")
+	if len(filter.Levels) > 0 {
+		levels := make(dbarray.String, len(filter.Levels))
+		for i, l := range filter.Levels {
+			levels[i] = l.String()
+		}
+		data["levels"] = levels
+		writeWhere(dataBuf, "level = ANY(:levels)")
+		writeWhere(countBuf, "level = ANY(:levels)")
 	}
 
 	if filter.Search != nil {
+		// The pattern is bound as a parameter, so wildcards inside the caller's
+		// text are matched literally by LIKE semantics only — never as SQL.
 		data["search"] = "%" + *filter.Search + "%"
 		writeWhere(dataBuf, "(message ILIKE :search OR source ILIKE :search)")
 		writeWhere(countBuf, "(message ILIKE :search OR source ILIKE :search)")
+	}
+
+	if filter.Source != nil {
+		data["source"] = *filter.Source
+		writeWhere(dataBuf, "source = :source")
+		writeWhere(countBuf, "source = :source")
+	}
+
+	if len(filter.Tags) > 0 {
+		tags := make(dbarray.String, len(filter.Tags))
+		copy(tags, filter.Tags)
+		data["tags"] = tags
+		// @> requires every listed tag, so repeating ?tag= narrows the result.
+		writeWhere(dataBuf, "tags @> :tags")
+		writeWhere(countBuf, "tags @> :tags")
 	}
 
 	if filter.From != nil {

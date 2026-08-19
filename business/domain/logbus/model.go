@@ -119,13 +119,68 @@ const TotalCap = 10000
 
 // QueryFilter holds filters for a log query.
 type QueryFilter struct {
-	ProjectID  uuid.UUID
-	Level      *Level
-	Search     *string
+	ProjectID uuid.UUID
+
+	// Levels matches any of the given levels. Empty means all.
+	Levels []Level
+
+	// Search matches the message or source, case-insensitively.
+	Search *string
+
+	// Source matches the emitting service exactly.
+	Source *string
+
+	// Tags requires every listed tag to be present on the row.
+	Tags []string
+
 	From       *time.Time
 	To         *time.Time
 	SourceType *string
 	TotalMode  TotalMode
+}
+
+// scanFilters reports whether the filter uses a predicate with no supporting
+// index, which forces a walk of the (project_id, ts DESC) index until the limit
+// is met. On the largest project a miss costs ~345ms bounded to two hours but
+// ~4.2s bounded to a day, so these queries are window-bound.
+//
+// levels is included even though a single level can hit logs_level_idx: that
+// only wins when the level is globally rare, and `level = ANY(...)` cannot use
+// the index at all — measured unbounded, a WARN+ERROR filter on the largest
+// project ran past 60s. A composite (project_id, level, ts DESC) index would
+// lift this, and is worth building once retention has shrunk the table.
+//
+// sourceType is excluded: logs_project_sourcetype_ts_idx covers it directly.
+func (f QueryFilter) scanFilters() bool {
+	return f.Search != nil || f.Source != nil || len(f.Tags) > 0 || len(f.Levels) > 0
+}
+
+// applyScanWindow bounds a query that uses an unindexed predicate. Callers that
+// pass no lower bound get one; a range wider than MaxRawWindow is refused rather
+// than served slowly.
+//
+// This constraint disappears once message and tags are GIN-indexed.
+func (f *QueryFilter) applyScanWindow(now time.Time) error {
+	if !f.scanFilters() {
+		return nil
+	}
+
+	to := now
+	if f.To != nil {
+		to = *f.To
+	}
+
+	if f.From == nil {
+		from := to.Add(-MaxRawWindow)
+		f.From = &from
+		return nil
+	}
+
+	if to.Sub(*f.From) > MaxRawWindow {
+		return ErrWindowTooWide
+	}
+
+	return nil
 }
 
 // QueryResult holds a page of log results. Total is nil when the caller asked

@@ -115,6 +115,10 @@ func (b *Business) QueryByID(ctx context.Context, id uuid.UUID) (Log, error) {
 
 // Query returns a filtered, cursor-paginated page of logs for a project.
 func (b *Business) Query(ctx context.Context, filter QueryFilter, limit int, cursorStr string) (QueryResult, error) {
+	if err := filter.applyScanWindow(time.Now().UTC()); err != nil {
+		return QueryResult{}, err
+	}
+
 	var afterTs *time.Time
 	var afterID *uuid.UUID
 
