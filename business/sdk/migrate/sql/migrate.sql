@@ -736,3 +736,53 @@ CREATE INDEX IF NOT EXISTS logs_meta_gin_idx ON logs USING gin (meta jsonb_path_
 -- containment badly enough that it prefers the ordered ts walk, so tag filters
 -- stay window-bound in the application. See QueryFilter.scanFilters.
 CREATE INDEX IF NOT EXISTS logs_tags_gin_idx ON logs USING gin (tags);
+
+-- Version: 1.36
+-- Description: Saved views and dashboards
+-- Both are a named, owned, org-scoped JSON document, so they share one shape and
+-- one visibility rule. The definition itself is opaque to the backend: it is the
+-- frontend's query and layout state, round-tripped verbatim. Only its size is
+-- policed, since nothing here can validate its meaning.
+--
+-- visibility is 'private' (creator only) or 'org' (every member). project_id is
+-- optional: a view pinned to a project is only offered to callers who can see
+-- that project, while a null project_id spans the org.
+DO $$ BEGIN CREATE TYPE view_visibility AS ENUM ('private', 'org');
+EXCEPTION
+WHEN duplicate_object THEN NULL;
+END $$;
+CREATE TABLE IF NOT EXISTS saved_views (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    project_id UUID NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    query JSONB NOT NULL DEFAULT '{}'::jsonb,
+    visibility view_visibility NOT NULL DEFAULT 'org',
+    created_by UUID NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT saved_views_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT saved_views_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT saved_views_owner_fk FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT saved_views_name_not_blank CHECK (length(btrim(name)) > 0)
+);
+CREATE INDEX IF NOT EXISTS saved_views_org_idx ON saved_views (org_id, name);
+CREATE INDEX IF NOT EXISTS saved_views_owner_idx ON saved_views (created_by);
+CREATE TABLE IF NOT EXISTS dashboards (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    panels JSONB NOT NULL DEFAULT '[]'::jsonb,
+    visibility view_visibility NOT NULL DEFAULT 'org',
+    created_by UUID NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT dashboards_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT dashboards_owner_fk FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT dashboards_name_not_blank CHECK (length(btrim(name)) > 0),
+    CONSTRAINT dashboards_panels_is_array CHECK (jsonb_typeof(panels) = 'array')
+);
+CREATE INDEX IF NOT EXISTS dashboards_org_idx ON dashboards (org_id, name);
+CREATE INDEX IF NOT EXISTS dashboards_owner_idx ON dashboards (created_by);

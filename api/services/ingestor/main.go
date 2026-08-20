@@ -61,6 +61,8 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus/extensions/userotel"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/usercache"
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
+	"github.com/jkarage/logingestor/business/domain/viewbus"
+	"github.com/jkarage/logingestor/business/domain/viewbus/stores/viewdb"
 	"github.com/jkarage/logingestor/business/sdk/auditexport"
 	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
@@ -368,6 +370,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// compared, never recovered.
 	scimBus := scimbus.NewBusiness(log, scimdb.NewStore(log, db))
 
+	viewBus := viewbus.NewBusiness(log, viewdb.NewStore(log, db))
+
 	logOtelExt := logotel.NewExtension()
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
@@ -460,6 +464,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			UsageBus:       usageBus,
 			SSOBus:         ssoBus,
 			SCIMBus:        scimBus,
+			ViewBus:        viewBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

@@ -16,6 +16,7 @@ import (
 	"github.com/jkarage/logingestor/app/domain/ssoapp"
 	"github.com/jkarage/logingestor/app/domain/usageapp"
 	"github.com/jkarage/logingestor/app/domain/userapp"
+	"github.com/jkarage/logingestor/app/domain/viewapp"
 	"github.com/jkarage/logingestor/app/sdk/mux"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -120,6 +121,14 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		UsageBus:   cfg.BusConfig.UsageBus,
 		OrgBus:     cfg.BusConfig.OrgBus,
+	})
+
+	viewapp.Routes(app, viewapp.Config{
+		Log:        cfg.Log,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+		ViewBus:    cfg.BusConfig.ViewBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
+		ProjectBus: cfg.BusConfig.ProjectBus,
 	})
 
 	scimapp.Routes(app, scimapp.Config{

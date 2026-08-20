@@ -22,6 +22,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/ssobus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
+	"github.com/jkarage/logingestor/business/domain/viewbus"
 	emailer "github.com/jkarage/logingestor/foundation/email"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -85,6 +86,7 @@ type BusConfig struct {
 	UsageBus       usagebus.ExtBusiness
 	SSOBus         *ssobus.Business
 	SCIMBus        *scimbus.Business
+	ViewBus        *viewbus.Business
 }
 
 // SSOConfig contains single sign-on endpoint configuration.
