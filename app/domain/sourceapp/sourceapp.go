@@ -13,18 +13,25 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
+	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/foundation/web"
 )
 
 type app struct {
 	sourceBus  sourcebus.ExtBusiness
 	projectBus projectbus.ExtBusiness
+
+	// usageBus supplies the ingest counters health is derived from. It is
+	// optional: with no usage store wired, sources still list and every one
+	// reports the counters it has, which is none.
+	usageBus usagebus.ExtBusiness
 }
 
-func newApp(sourceBus sourcebus.ExtBusiness, projectBus projectbus.ExtBusiness) *app {
+func newApp(sourceBus sourcebus.ExtBusiness, projectBus projectbus.ExtBusiness, usageBus usagebus.ExtBusiness) *app {
 	return &app{
 		sourceBus:  sourceBus,
 		projectBus: projectBus,
+		usageBus:   usageBus,
 	}
 }
 
@@ -125,7 +132,121 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.Errorf(errs.Internal, "querybyorg: orgID[%s]: %s", orgID, err)
 	}
 
-	return toAppSources(sources)
+	now := time.Now().UTC()
+
+	// One counters query for the whole page rather than one per source: the
+	// Sources UI shows health on every row, and a request per row is what makes a
+	// list page slow as an org adds collectors.
+	counters, err := a.healthCounters(ctx, sources, now)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "healthcounters: orgID[%s]: %s", orgID, err)
+	}
+
+	return toAppSources(sources, counters, now)
+}
+
+// health handles GET /v1/orgs/{org_id}/sources/{source_id}/health.
+func (a *app) health(ctx context.Context, r *http.Request) web.Encoder {
+	source, errResp := a.loadOrgSource(ctx, r)
+	if errResp != nil {
+		return errResp
+	}
+
+	now := time.Now().UTC()
+	end := now.Truncate(time.Hour).Add(time.Hour)
+	start := end.Add(-sourcebus.HealthWindow)
+
+	counters, err := a.healthCounters(ctx, []sourcebus.Source{source}, now)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "healthcounters: sourceID[%s]: %s", source.ID, err)
+	}
+
+	h := source.Health(now, counters[source.ID])
+
+	out := SourceHealth{
+		SourceID:     source.ID.String(),
+		Status:       string(h.Status),
+		IsActive:     source.IsActive,
+		Expired:      source.Expired(now),
+		WindowStart:  start.Format(time.RFC3339),
+		WindowEnd:    end.Format(time.RFC3339),
+		Events24h:    h.Events,
+		Errors24h:    h.Errors,
+		Dropped24h:   h.Dropped,
+		ErrorRate24h: h.ErrorRate,
+		Buckets:      []HealthBucket{},
+	}
+
+	if source.ExpiresAt != nil {
+		v := source.ExpiresAt.Format(time.RFC3339)
+		out.ExpiresAt = &v
+	}
+	if source.LastSeenAt != nil {
+		v := source.LastSeenAt.Format(time.RFC3339)
+		out.LastSeenAt = &v
+	}
+
+	if a.usageBus != nil {
+		buckets, err := a.usageBus.QuerySourceBuckets(ctx, source.ID, start, end)
+		if err != nil {
+			return errs.Errorf(errs.Internal, "querysourcebuckets: sourceID[%s]: %s", source.ID, err)
+		}
+		out.Buckets = fillBuckets(buckets, start, end)
+	} else {
+		out.Buckets = fillBuckets(nil, start, end)
+	}
+
+	return out
+}
+
+// healthCounters loads the ingest counters for a set of sources over the health
+// window, keyed by source ID.
+func (a *app) healthCounters(ctx context.Context, sources []sourcebus.Source, now time.Time) (map[uuid.UUID]sourcebus.HealthCounters, error) {
+	out := make(map[uuid.UUID]sourcebus.HealthCounters, len(sources))
+	if a.usageBus == nil || len(sources) == 0 {
+		return out, nil
+	}
+
+	ids := make([]uuid.UUID, len(sources))
+	for i, s := range sources {
+		ids[i] = s.ID
+	}
+
+	from := now.Truncate(time.Hour).Add(time.Hour).Add(-sourcebus.HealthWindow)
+
+	counters, err := a.usageBus.QuerySourceCounters(ctx, ids, from)
+	if err != nil {
+		return nil, err
+	}
+
+	for id, c := range counters {
+		out[id] = sourcebus.HealthCounters{Events: c.Events, Errors: c.Errors, Dropped: c.Dropped}
+	}
+
+	return out, nil
+}
+
+// fillBuckets projects the hours that carry counters onto the full hourly grid of
+// the window, so a client plots a fixed-width series and a gap reads as a gap
+// rather than a missing point.
+func fillBuckets(counters []usagebus.HourCounters, start, end time.Time) []HealthBucket {
+	byHour := make(map[time.Time]usagebus.HourCounters, len(counters))
+	for _, c := range counters {
+		byHour[c.Hour.UTC()] = c
+	}
+
+	out := make([]HealthBucket, 0, int(end.Sub(start)/time.Hour))
+	for h := start; h.Before(end); h = h.Add(time.Hour) {
+		c := byHour[h]
+		out = append(out, HealthBucket{
+			Hour:    h.Format(time.RFC3339),
+			Events:  c.Events,
+			Errors:  c.Errors,
+			Dropped: c.Dropped,
+		})
+	}
+
+	return out
 }
 
 // disconnect handles DELETE /v1/orgs/{org_id}/sources/{source_id} — soft-disable.

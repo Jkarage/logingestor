@@ -12,7 +12,8 @@ import (
 	"github.com/jkarage/logingestor/foundation/logger"
 )
 
-// Usage is a counter delta to fold into a source's daily tally.
+// Usage is a counter delta to fold into a source's daily tally, and into the
+// hourly counters that back source health.
 type Usage struct {
 	SourceID     uuid.UUID
 	OrgID        uuid.UUID
@@ -21,6 +22,34 @@ type Usage struct {
 	EventCount   int64
 	ByteCount    int64
 	DroppedCount int64
+
+	// ErrorCount is how many of the accepted events were at ERROR. It feeds the
+	// health error rate and is not part of quota accounting.
+	ErrorCount int64
+}
+
+// SourceCounters is one source's ingest counters over a window.
+type SourceCounters struct {
+	Events  int64
+	Errors  int64
+	Dropped int64
+}
+
+// ErrorRate returns the share of events at ERROR, or zero when nothing arrived.
+func (c SourceCounters) ErrorRate() float64 {
+	if c.Events <= 0 {
+		return 0
+	}
+	return float64(c.Errors) / float64(c.Events)
+}
+
+// HourCounters is one hour of a source's ingest counters. Hour is the start of
+// the UTC hour the counters were folded into.
+type HourCounters struct {
+	Hour    time.Time
+	Events  int64
+	Errors  int64
+	Dropped int64
 }
 
 // ProjectUsage is one project's totals over a window.
@@ -66,6 +95,8 @@ func (q QuotaStatus) Exceeded() bool {
 // Storer declares the persistence behavior this package needs.
 type Storer interface {
 	Record(ctx context.Context, u Usage) error
+	QuerySourceCounters(ctx context.Context, sourceIDs []uuid.UUID, from time.Time) (map[uuid.UUID]SourceCounters, error)
+	QuerySourceBuckets(ctx context.Context, sourceID uuid.UUID, from, to time.Time) ([]HourCounters, error)
 	UsedToday(ctx context.Context, orgID uuid.UUID, day time.Time) (int64, error)
 	Quota(ctx context.Context, orgID uuid.UUID) (int64, error)
 	QueryByOrg(ctx context.Context, orgID uuid.UUID, from, to time.Time) ([]ProjectUsage, error)
@@ -78,6 +109,8 @@ type Storer interface {
 // ExtBusiness is the public business interface.
 type ExtBusiness interface {
 	Record(ctx context.Context, u Usage) error
+	QuerySourceCounters(ctx context.Context, sourceIDs []uuid.UUID, from time.Time) (map[uuid.UUID]SourceCounters, error)
+	QuerySourceBuckets(ctx context.Context, sourceID uuid.UUID, from, to time.Time) ([]HourCounters, error)
 	CheckQuota(ctx context.Context, orgID uuid.UUID, day time.Time) (QuotaStatus, error)
 	QueryByOrg(ctx context.Context, orgID uuid.UUID, from, to time.Time) (OrgUsage, error)
 
@@ -171,4 +204,32 @@ func (b *Business) CheckAppQuota(ctx context.Context, orgID uuid.UUID, day time.
 	}
 
 	return QuotaStatus{Quota: quota, Used: used}, nil
+}
+
+// QuerySourceCounters totals each source's counters since from. Sources with no
+// ingest in the window are absent from the map rather than present with zeros,
+// so a caller can tell "nothing arrived" from "no such source".
+func (b *Business) QuerySourceCounters(ctx context.Context, sourceIDs []uuid.UUID, from time.Time) (map[uuid.UUID]SourceCounters, error) {
+	if len(sourceIDs) == 0 {
+		return map[uuid.UUID]SourceCounters{}, nil
+	}
+
+	counters, err := b.storer.QuerySourceCounters(ctx, sourceIDs, from)
+	if err != nil {
+		return nil, fmt.Errorf("querysourcecounters: %w", err)
+	}
+
+	return counters, nil
+}
+
+// QuerySourceBuckets returns one source's hourly counters over [from, to).
+// Empty hours are omitted; the caller fills them, since only it knows the
+// bucket grid it wants to plot.
+func (b *Business) QuerySourceBuckets(ctx context.Context, sourceID uuid.UUID, from, to time.Time) ([]HourCounters, error) {
+	buckets, err := b.storer.QuerySourceBuckets(ctx, sourceID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("querysourcebuckets: %w", err)
+	}
+
+	return buckets, nil
 }

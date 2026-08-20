@@ -9,6 +9,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
+	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -23,6 +24,7 @@ type Config struct {
 	OrgBus     orgbus.ExtBusiness
 	ProjectBus projectbus.ExtBusiness
 	SourceBus  sourcebus.ExtBusiness
+	UsageBus   usagebus.ExtBusiness
 }
 
 // Routes adds specific routes for this group.
@@ -32,10 +34,11 @@ func Routes(app *web.App, cfg Config) {
 	authen := mid.Authenticate(cfg.AuthClient)
 	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
-	api := newApp(cfg.SourceBus, cfg.ProjectBus)
+	api := newApp(cfg.SourceBus, cfg.ProjectBus, cfg.UsageBus)
 
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources", api.query, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources", api.create, authen, orgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/sources/{source_id}", api.disconnect, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources/{source_id}/rotate-key", api.rotateKey, authen, orgAdmin)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources/{source_id}/health", api.health, authen, orgAdmin)
 }

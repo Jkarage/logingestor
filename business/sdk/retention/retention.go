@@ -31,6 +31,11 @@ const (
 // keepForever is the retention_days sentinel meaning "never expire".
 const keepForever = -1
 
+// defaultSourceStatsDays is how long per-source hourly counters are kept. Source
+// health reads a 24 hour window; two weeks leaves room to widen it without a
+// migration and still keeps the table trivially small.
+const defaultSourceStatsDays = 14
+
 // Config bounds one retention run so a scheduled pass makes steady progress
 // without monopolising the database.
 type Config struct {
@@ -48,17 +53,26 @@ type Config struct {
 
 	// MaxRuntime caps the wall-clock time of a run. Zero means unlimited.
 	MaxRuntime time.Duration
+
+	// SourceStatsDays is how long per-source hourly ingest counters are kept.
+	// They back source health, which only ever reads the last 24 hours, so this
+	// is short by design and negative keeps them forever. Zero means the default.
+	SourceStatsDays int
 }
 
 // DefaultConfig is a conservative pass: ~2M rows or 10 minutes, whichever comes
 // first. A backlog larger than that drains over successive runs.
 func DefaultConfig() Config {
-	return Config{BatchSize: 10_000, MaxRows: 2_000_000, MaxRuntime: 10 * time.Minute, AuditDays: keepForever}
+	return Config{BatchSize: 10_000, MaxRows: 2_000_000, MaxRuntime: 10 * time.Minute, AuditDays: keepForever,
+		SourceStatsDays: defaultSourceStatsDays}
 }
 
 func (c Config) withDefaults() Config {
 	if c.BatchSize <= 0 {
 		c.BatchSize = 10_000
+	}
+	if c.SourceStatsDays == 0 {
+		c.SourceStatsDays = defaultSourceStatsDays
 	}
 	return c
 }
@@ -68,6 +82,11 @@ type Result struct {
 	InfraDeleted int64
 	AppDeleted   int64
 	AuditDeleted int64
+
+	// SourceStatsDeleted counts pruned per-source hourly counter rows. It is not
+	// part of Total: those rows are derived counters, not ingested data, and
+	// pruning them must not consume the run's row budget.
+	SourceStatsDeleted int64
 
 	// Incomplete is true when the run stopped on its row or time budget, meaning
 	// expired rows remain and the next run should continue.
@@ -167,13 +186,50 @@ func Run(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (Resu
 		return res, err
 	}
 
+	res.SourceStatsDeleted, err = pruneSourceStats(ctx, log, db, cfg)
+	if err != nil {
+		return res, err
+	}
+
 	log.Info(ctx, "retention complete",
 		"infra_deleted", res.InfraDeleted,
 		"app_deleted", res.AppDeleted,
 		"audit_deleted", res.AuditDeleted,
+		"source_stats_deleted", res.SourceStatsDeleted,
 		"elapsed", time.Since(start).String())
 
 	return res, nil
+}
+
+// pruneSourceStats drops per-source hourly counters that have aged out.
+//
+// Unlike the log passes this needs no rollup repair and no batching: the table
+// holds at most one row per source per hour, so even a year of a busy tenant is
+// thousands of rows, and the delete is served by the index on hour.
+func pruneSourceStats(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (int64, error) {
+	if !expires(cfg.SourceStatsDays) {
+		return 0, nil
+	}
+
+	cutoff := time.Now().UTC().Add(-time.Duration(cfg.SourceStatsDays) * 24 * time.Hour)
+
+	const q = `DELETE FROM ingest_stats_hourly WHERE hour < $1`
+
+	r, err := db.ExecContext(ctx, q, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune source stats: %w", err)
+	}
+
+	deleted, err := r.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("rows affected: %w", err)
+	}
+
+	if deleted > 0 {
+		log.Info(ctx, "retention pruned source stats", "days", cfg.SourceStatsDays, "deleted", deleted)
+	}
+
+	return deleted, nil
 }
 
 // purgeAudit ages out audit records, in batches like the log passes. There is no

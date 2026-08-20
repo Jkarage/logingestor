@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
+	"github.com/jkarage/logingestor/business/sdk/sqldb/dbarray"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jmoiron/sqlx"
 )
@@ -24,27 +25,38 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 
-// Record upserts a daily usage delta for a source.
+// Record folds a batch's counters into the source's daily tally and into its
+// hourly counters. Both are written in one transaction: the daily row is what
+// quota is enforced from and the hourly rows are what health is read from, and a
+// source that looks quiet on one and busy on the other is worse than either
+// being briefly stale.
 func (s *Store) Record(ctx context.Context, u usagebus.Usage) error {
 	data := struct {
 		SourceID     string    `db:"source_id"`
 		OrgID        string    `db:"org_id"`
 		ProjectID    string    `db:"project_id"`
 		Day          time.Time `db:"day"`
+		Hour         time.Time `db:"hour"`
 		EventCount   int64     `db:"event_count"`
 		ByteCount    int64     `db:"byte_count"`
 		DroppedCount int64     `db:"dropped_count"`
+		ErrorCount   int64     `db:"error_count"`
 	}{
-		SourceID:     u.SourceID.String(),
-		OrgID:        u.OrgID.String(),
-		ProjectID:    u.ProjectID.String(),
-		Day:          u.Day.UTC(),
+		SourceID:  u.SourceID.String(),
+		OrgID:     u.OrgID.String(),
+		ProjectID: u.ProjectID.String(),
+		Day:       u.Day.UTC(),
+
+		// Truncating in UTC matters: in a +05:45 zone a local truncation lands
+		// mid-hour and the buckets stop lining up with the grid the API returns.
+		Hour:         u.Day.UTC().Truncate(time.Hour),
 		EventCount:   u.EventCount,
 		ByteCount:    u.ByteCount,
 		DroppedCount: u.DroppedCount,
+		ErrorCount:   u.ErrorCount,
 	}
 
-	const q = `
+	const dailyQ = `
 	INSERT INTO ingest_usage
 		(source_id, org_id, project_id, day, event_count, byte_count, dropped_count)
 	VALUES
@@ -54,11 +66,103 @@ func (s *Store) Record(ctx context.Context, u usagebus.Usage) error {
 		byte_count    = ingest_usage.byte_count + EXCLUDED.byte_count,
 		dropped_count = ingest_usage.dropped_count + EXCLUDED.dropped_count`
 
-	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, data); err != nil {
-		return fmt.Errorf("namedexeccontext: %w", err)
+	const hourlyQ = `
+	INSERT INTO ingest_stats_hourly
+		(source_id, hour, event_count, error_count, dropped_count)
+	VALUES
+		(:source_id, :hour, :event_count, :error_count, :dropped_count)
+	ON CONFLICT (source_id, hour) DO UPDATE SET
+		event_count   = ingest_stats_hourly.event_count + EXCLUDED.event_count,
+		error_count   = ingest_stats_hourly.error_count + EXCLUDED.error_count,
+		dropped_count = ingest_stats_hourly.dropped_count + EXCLUDED.dropped_count`
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begintxx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, q := range []string{dailyQ, hourlyQ} {
+		if err := sqldb.NamedExecContext(ctx, s.log, tx, q, data); err != nil {
+			return fmt.Errorf("namedexeccontext: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
 	}
 
 	return nil
+}
+
+// QuerySourceCounters totals the hourly counters per source since from.
+//
+// The hour column is compared against a truncated bound so a request part-way
+// through an hour still includes that whole hour's row; a health figure that
+// dropped the current hour would read as a stall right after ingest resumed.
+func (s *Store) QuerySourceCounters(ctx context.Context, sourceIDs []uuid.UUID, from time.Time) (map[uuid.UUID]usagebus.SourceCounters, error) {
+	ids := make(dbarray.String, len(sourceIDs))
+	for i, id := range sourceIDs {
+		ids[i] = id.String()
+	}
+
+	data := struct {
+		SourceIDs dbarray.String `db:"source_ids"`
+		From      time.Time      `db:"from"`
+	}{SourceIDs: ids, From: from.UTC().Truncate(time.Hour)}
+
+	const q = `
+	SELECT source_id,
+		COALESCE(sum(event_count), 0)   AS events,
+		COALESCE(sum(error_count), 0)   AS errors,
+		COALESCE(sum(dropped_count), 0) AS dropped
+	FROM ingest_stats_hourly
+	WHERE source_id = ANY(CAST(:source_ids AS uuid[])) AND hour >= :from
+	GROUP BY source_id`
+
+	var rows []sourceCountersDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &rows); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	out := make(map[uuid.UUID]usagebus.SourceCounters, len(rows))
+	for _, r := range rows {
+		id, err := uuid.Parse(r.SourceID)
+		if err != nil {
+			return nil, fmt.Errorf("parse source id: %w", err)
+		}
+		out[id] = usagebus.SourceCounters{Events: r.Events, Errors: r.Errors, Dropped: r.Dropped}
+	}
+
+	return out, nil
+}
+
+// QuerySourceBuckets returns one source's hourly counters over [from, to),
+// oldest first.
+func (s *Store) QuerySourceBuckets(ctx context.Context, sourceID uuid.UUID, from, to time.Time) ([]usagebus.HourCounters, error) {
+	data := struct {
+		SourceID string    `db:"source_id"`
+		From     time.Time `db:"from"`
+		To       time.Time `db:"to"`
+	}{SourceID: sourceID.String(), From: from.UTC().Truncate(time.Hour), To: to.UTC()}
+
+	const q = `
+	SELECT hour, event_count AS events, error_count AS errors, dropped_count AS dropped
+	FROM ingest_stats_hourly
+	WHERE source_id = :source_id AND hour >= :from AND hour < :to
+	ORDER BY hour`
+
+	var rows []hourCountersDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &rows); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	out := make([]usagebus.HourCounters, len(rows))
+	for i, r := range rows {
+		out[i] = usagebus.HourCounters{Hour: r.Hour.UTC(), Events: r.Events, Errors: r.Errors, Dropped: r.Dropped}
+	}
+
+	return out, nil
 }
 
 // UsedToday returns the total infra events ingested by an org on the given day.

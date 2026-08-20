@@ -105,6 +105,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		OrgBus:     cfg.BusConfig.OrgBus,
 		ProjectBus: cfg.BusConfig.ProjectBus,
 		SourceBus:  cfg.BusConfig.SourceBus,
+		UsageBus:   cfg.BusConfig.UsageBus,
 	})
 
 	ingestapp.Routes(app, ingestapp.Config{

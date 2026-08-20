@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 )
 
@@ -64,6 +65,15 @@ type Source struct {
 	// client does not have to compare clocks to render key health.
 	ExpiresAt *string `json:"expiresAt"`
 	Expired   bool    `json:"expired"`
+
+	// Health over the last 24 hours, so the list can be rendered without a
+	// request per row. HealthStatus is one of disconnected, expired,
+	// never_connected, silent, degraded, healthy.
+	HealthStatus string  `json:"healthStatus"`
+	Events24h    int64   `json:"events24h"`
+	Errors24h    int64   `json:"errors24h"`
+	Dropped24h   int64   `json:"dropped24h"`
+	ErrorRate24h float64 `json:"errorRate24h"`
 }
 
 // Sources is the list response shape: { "sources": [ ... ] }.
@@ -100,6 +110,41 @@ func (app RotatedKey) Encode() ([]byte, string, error) {
 	return data, "application/json", err
 }
 
+// SourceHealth is the detail response for one source, adding the hourly shape of
+// the window to the same figures the list carries.
+type SourceHealth struct {
+	SourceID     string  `json:"sourceId"`
+	Status       string  `json:"status"`
+	IsActive     bool    `json:"isActive"`
+	Expired      bool    `json:"expired"`
+	ExpiresAt    *string `json:"expiresAt"`
+	LastSeenAt   *string `json:"lastSeenAt"`
+	WindowStart  string  `json:"windowStart"`
+	WindowEnd    string  `json:"windowEnd"`
+	Events24h    int64   `json:"events24h"`
+	Errors24h    int64   `json:"errors24h"`
+	Dropped24h   int64   `json:"dropped24h"`
+	ErrorRate24h float64 `json:"errorRate24h"`
+
+	// Buckets always covers every hour of the window, zero-filled, so a client
+	// can plot it without normalising absent hours.
+	Buckets []HealthBucket `json:"buckets"`
+}
+
+// HealthBucket is one hour of a source's ingest.
+type HealthBucket struct {
+	Hour    string `json:"hour"`
+	Events  int64  `json:"events"`
+	Errors  int64  `json:"errors"`
+	Dropped int64  `json:"dropped"`
+}
+
+// Encode implements the web.Encoder interface.
+func (app SourceHealth) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(app)
+	return data, "application/json", err
+}
+
 func toAppSource(bus sourcebus.Source) Source {
 	s := Source{
 		ID:        bus.ID.String(),
@@ -123,10 +168,25 @@ func toAppSource(bus sourcebus.Source) Source {
 	return s
 }
 
-func toAppSources(buses []sourcebus.Source) Sources {
+// withHealth attaches the derived health for a source to its API row.
+func withHealth(s Source, h sourcebus.Health) Source {
+	s.HealthStatus = string(h.Status)
+	s.Events24h = h.Events
+	s.Errors24h = h.Errors
+	s.Dropped24h = h.Dropped
+	s.ErrorRate24h = h.ErrorRate
+
+	return s
+}
+
+// toAppSources maps sources onto the list response, deriving each one's health
+// from counters keyed by source ID. A source missing from counters had no ingest
+// in the window, which is a health state rather than missing data.
+func toAppSources(buses []sourcebus.Source, counters map[uuid.UUID]sourcebus.HealthCounters, now time.Time) Sources {
 	out := make([]Source, len(buses))
 	for i, b := range buses {
-		out[i] = toAppSource(b)
+		out[i] = withHealth(toAppSource(b), b.Health(now, counters[b.ID]))
 	}
+
 	return Sources{Sources: out}
 }

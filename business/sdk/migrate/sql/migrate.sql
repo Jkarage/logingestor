@@ -786,3 +786,28 @@ CREATE TABLE IF NOT EXISTS dashboards (
 );
 CREATE INDEX IF NOT EXISTS dashboards_org_idx ON dashboards (org_id, name);
 CREATE INDEX IF NOT EXISTS dashboards_owner_idx ON dashboards (created_by);
+
+-- Version: 1.37
+-- Description: Per-source hourly ingest counters backing source health
+-- The Sources UI needs "events and errors in the last 24 hours" per source.
+-- Counting that from logs costs 735ms for a single source at 700k events/day
+-- (bitmap scan plus a 7,600 block heap fetch for the level), and grows with
+-- ingest, so it is rolled up at write time instead — the same trade the
+-- log_stats_hourly rollup makes for /logs/stats.
+--
+-- The counters come from the ingest path's existing async usage recorder rather
+-- than the logs transaction, so they describe what was accepted, not what a
+-- later purge left behind. That is the right basis for a health signal and it
+-- keeps this table out of retention's rollup-repair contract; rows are simply
+-- pruned once they age past the health window.
+CREATE TABLE IF NOT EXISTS ingest_stats_hourly (
+    source_id     UUID NOT NULL,
+    hour          TIMESTAMPTZ NOT NULL,
+    event_count   BIGINT NOT NULL DEFAULT 0,
+    error_count   BIGINT NOT NULL DEFAULT 0,
+    dropped_count BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ingest_stats_hourly_pkey PRIMARY KEY (source_id, hour),
+    CONSTRAINT ingest_stats_hourly_source_fk FOREIGN KEY (source_id) REFERENCES sources (id) ON DELETE CASCADE
+);
+-- Pruning deletes by age across every source, which the primary key cannot serve.
+CREATE INDEX IF NOT EXISTS ingest_stats_hourly_hour_idx ON ingest_stats_hourly (hour);

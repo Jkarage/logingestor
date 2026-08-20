@@ -142,6 +142,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// AuditDays defaults to -1 (keep forever): audit is a compliance
 			// surface, so ageing it out is an explicit choice.
 			AuditDays int `conf:"default:-1"`
+
+			// SourceStatsDays bounds the per-source hourly counters behind source
+			// health. Health reads 24 hours; -1 keeps them forever.
+			SourceStatsDays int `conf:"default:14"`
 		}
 		Auth struct {
 			Host       string `conf:"default:http://localhost:6000"`
@@ -412,10 +416,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 
 	if cfg.Retention.Enabled {
 		retentionCfg := retention.Config{
-			BatchSize:  cfg.Retention.BatchSize,
-			MaxRows:    cfg.Retention.MaxRows,
-			MaxRuntime: cfg.Retention.MaxRuntime,
-			AuditDays:  cfg.Retention.AuditDays,
+			BatchSize:       cfg.Retention.BatchSize,
+			MaxRows:         cfg.Retention.MaxRows,
+			MaxRuntime:      cfg.Retention.MaxRuntime,
+			AuditDays:       cfg.Retention.AuditDays,
+			SourceStatsDays: cfg.Retention.SourceStatsDays,
 		}
 
 		log.Info(ctx, "startup", "status", "retention worker started",

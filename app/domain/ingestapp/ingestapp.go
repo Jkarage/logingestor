@@ -134,6 +134,7 @@ func (a *app) process(ctx context.Context, src sourcebus.Source, recs []ingest.R
 	}
 
 	accepted := 0
+	errored := 0
 	if len(newLogs) > 0 {
 		logs, err := a.logBus.BulkCreate(ctx, newLogs)
 		if err != nil {
@@ -141,11 +142,19 @@ func (a *app) process(ctx context.Context, src sourcebus.Source, recs []ingest.R
 		}
 		accepted = len(logs)
 
+		// Counted from what was persisted rather than what was submitted, so the
+		// health error rate cannot exceed the events it is a share of.
+		for _, l := range logs {
+			if l.Level.Equal(logbus.LevelError) {
+				errored++
+			}
+		}
+
 		// Best-effort live tail; never block the write path on subscribers.
 		a.hub.BroadcastLogs(logs)
 	}
 
-	a.recordUsage(ctx, src, now, accepted, bodyLen, dropped)
+	a.recordUsage(ctx, src, now, accepted, bodyLen, dropped, errored)
 	a.touchLastSeen(ctx, src.ID, now)
 
 	metrics.AddIngestAccepted(ctx, accepted)
@@ -167,7 +176,7 @@ func (a *app) throttled(ctx context.Context, retry time.Duration, msg string) we
 
 // recordUsage folds this batch's counters into the source's daily tally. It is
 // best-effort and runs asynchronously so it never adds latency to the request.
-func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Time, accepted, bytes, dropped int) {
+func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Time, accepted, bytes, dropped, errored int) {
 	if a.usageBus == nil {
 		return
 	}
@@ -179,6 +188,7 @@ func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Ti
 		EventCount:   int64(accepted),
 		ByteCount:    int64(bytes),
 		DroppedCount: int64(dropped),
+		ErrorCount:   int64(errored),
 	}
 	go func() {
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
