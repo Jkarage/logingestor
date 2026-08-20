@@ -37,6 +37,7 @@ type Storer interface {
 	GrantProjectAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) error
 	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
 	OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error)
+	QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
 }
 
 // ExtBusiness interface provides support for extensions that wrap extra
@@ -55,6 +56,7 @@ type ExtBusiness interface {
 	GrantProjectAccess(ctx context.Context, actorID uuid.UUID, userID uuid.UUID, projectID uuid.UUID) error
 	HasAccess(ctx context.Context, userID uuid.UUID, projectID uuid.UUID) (bool, error)
 	OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error)
+	QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error)
 }
 
 // Extension is a function that wraps a new layer of business logic
@@ -222,4 +224,18 @@ func (b *Business) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, e
 		return false, fmt.Errorf("orgenabled: %w", err)
 	}
 	return ok, nil
+}
+
+// QueryVisibleByOrg returns the projects in orgID that userID may read, using
+// the same rule as HasAccess: an ORG ADMIN or SUPER ADMIN membership sees every
+// project in the org, anyone else sees only those granted explicitly.
+//
+// It exists so an org-wide read resolves visibility in one query rather than
+// calling HasAccess once per project.
+func (b *Business) QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]Project, error) {
+	projects, err := b.storer.QueryVisibleByOrg(ctx, orgID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("queryvisiblebyorg: %w", err)
+	}
+	return projects, nil
 }

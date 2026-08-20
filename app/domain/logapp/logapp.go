@@ -210,12 +210,49 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
+	filter, limit, cursor, errResp := parseLogQuery(r)
+	if errResp != nil {
+		return errResp
+	}
+	filter.ProjectID = projectID
+
+	return a.runLogQuery(ctx, filter, limit, cursor)
+}
+
+// runLogQuery executes a prepared filter and renders the page. Shared by the
+// per-project and org-wide endpoints so both return an identical shape.
+func (a *app) runLogQuery(ctx context.Context, filter logbus.QueryFilter, limit int, cursor string) web.Encoder {
+	result, err := a.logBus.Query(ctx, filter, limit, cursor)
+	if err != nil {
+		if errors.Is(err, logbus.ErrWindowTooWide) {
+			return errs.New(errs.InvalidArgument, err)
+		}
+		return errs.Errorf(errs.Internal, "query: %s", err)
+	}
+
+	appLogs := make([]LogEntry, len(result.Logs))
+	for i, l := range result.Logs {
+		appLogs[i] = toAppLogEntry(l)
+	}
+
+	return LogsResponse{
+		Logs:         appLogs,
+		NextCursor:   result.NextCursor,
+		Total:        result.Total,
+		TotalIsExact: result.TotalIsExact,
+	}
+}
+
+// parseLogQuery reads every filter, paging and total option from the query
+// string. It deliberately does not touch project scoping — each endpoint sets
+// that itself — so the two share one contract for everything else.
+func parseLogQuery(r *http.Request) (logbus.QueryFilter, int, string, web.Encoder) {
+	var filter logbus.QueryFilter
+
 	q := r.URL.Query()
 
-	filter := logbus.QueryFilter{ProjectID: projectID}
-
 	if st, err := parseSourceType(q.Get("source_type")); err != nil {
-		return errs.New(errs.InvalidArgument, err)
+		return filter, 0, "", errs.New(errs.InvalidArgument, err)
 	} else if st != nil {
 		filter.SourceType = st
 	}
@@ -225,7 +262,7 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	for _, lvlStr := range csvValues(q["level"]) {
 		lvl, err := logbus.ParseLevel(lvlStr)
 		if err != nil {
-			return errs.New(errs.InvalidArgument, err)
+			return filter, 0, "", errs.New(errs.InvalidArgument, err)
 		}
 		filter.Levels = append(filter.Levels, lvl)
 	}
@@ -247,35 +284,32 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	// ?meta.orderId=123&meta.traceId=abc. Every pair must match.
 	filter.Meta = metaFilters(q)
 
-	if fromStr := q.Get("from"); fromStr != "" {
-		t, err := time.Parse(time.RFC3339, fromStr)
-		if err != nil {
-			return errs.New(errs.InvalidArgument, fmt.Errorf("invalid 'from': %w", err))
+	for _, f := range []struct {
+		name string
+		dst  **time.Time
+	}{{"from", &filter.From}, {"to", &filter.To}} {
+		v := q.Get(f.name)
+		if v == "" {
+			continue
 		}
-		filter.From = &t
-	}
-
-	if toStr := q.Get("to"); toStr != "" {
-		t, err := time.Parse(time.RFC3339, toStr)
+		t, err := time.Parse(time.RFC3339, v)
 		if err != nil {
-			return errs.New(errs.InvalidArgument, fmt.Errorf("invalid 'to': %w", err))
+			return filter, 0, "", errs.Errorf(errs.InvalidArgument, "invalid '%s': want RFC3339", f.name)
 		}
-		filter.To = &t
+		*f.dst = &t
 	}
 
 	limit := 100
 	if limitStr := q.Get("limit"); limitStr != "" {
 		n, err := strconv.Atoi(limitStr)
 		if err != nil || n <= 0 {
-			return errs.New(errs.InvalidArgument, fmt.Errorf("invalid 'limit'"))
+			return filter, 0, "", errs.New(errs.InvalidArgument, errors.New("invalid 'limit'"))
 		}
 		if n > 1000 {
 			n = 1000
 		}
 		limit = n
 	}
-
-	cursor := q.Get("cursor")
 
 	// total=bounded (default) keeps the count index-only and capped;
 	// total=exact opts into a true count(1), which on a project holding tens of
@@ -288,28 +322,10 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 	case "exact":
 		filter.TotalMode = logbus.TotalExact
 	default:
-		return errs.New(errs.InvalidArgument, errors.New("invalid 'total': want bounded, exact, or none"))
+		return filter, 0, "", errs.New(errs.InvalidArgument, errors.New("invalid 'total': want bounded, exact, or none"))
 	}
 
-	result, err := a.logBus.Query(ctx, filter, limit, cursor)
-	if err != nil {
-		if errors.Is(err, logbus.ErrWindowTooWide) {
-			return errs.New(errs.InvalidArgument, err)
-		}
-		return errs.Errorf(errs.Internal, "query: %s", err)
-	}
-
-	appLogs := make([]LogEntry, len(result.Logs))
-	for i, l := range result.Logs {
-		appLogs[i] = toAppLogEntry(l)
-	}
-
-	return LogsResponse{
-		Logs:         appLogs,
-		NextCursor:   result.NextCursor,
-		Total:        result.Total,
-		TotalIsExact: result.TotalIsExact,
-	}
+	return filter, limit, q.Get("cursor"), nil
 }
 
 // parseSourceType validates the optional source_type query param. An empty

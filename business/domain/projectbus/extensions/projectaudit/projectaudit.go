@@ -216,3 +216,8 @@ func (ext *Extension) HasAccess(ctx context.Context, userID uuid.UUID, projectID
 func (ext *Extension) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, error) {
 	return ext.bus.OrgEnabled(ctx, projectID)
 }
+
+// QueryVisibleByOrg does not apply auditing.
+func (ext *Extension) QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
+	return ext.bus.QueryVisibleByOrg(ctx, orgID, userID)
+}

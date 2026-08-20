@@ -104,3 +104,10 @@ func (ext *Extension) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool
 
 	return ext.bus.OrgEnabled(ctx, projectID)
 }
+
+func (ext *Extension) QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
+	ctx, span := otel.AddSpan(ctx, "business.projectbus.queryvisiblebyorg")
+	defer span.End()
+
+	return ext.bus.QueryVisibleByOrg(ctx, orgID, userID)
+}

@@ -33,11 +33,17 @@ func Routes(app *web.App, cfg Config) {
 
 	authen := mid.Authenticate(cfg.AuthClient)
 	projRead := mid.AuthorizeProjectAccess(cfg.ProjectBus, cfg.OrgBus)
+	orgMember := mid.AuthorizeOrgMember(cfg.OrgBus)
 
 	a := newApp(cfg.Log, cfg.LogBus, cfg.ProjectBus, cfg.AnalyzeBus, cfg.Hub, cfg.AuthClient, cfg.AllowedOrigins, cfg.UsageBus)
 
 	app.HandlerFunc(http.MethodPost, version, "/ingest", a.ingest, authen)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs", a.query, authen, projRead)
+
+	// Org-wide read across projects. Membership gates the request; which
+	// projects are actually readable is resolved inside the handler, so a viewer
+	// sees only what they were granted.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/logs", a.queryOrg, authen, orgMember)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stats", a.stats, authen, projRead)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/timeseries", a.timeseries, authen, projRead)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/aggregate", a.aggregate, authen, projRead)

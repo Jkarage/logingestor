@@ -328,3 +328,42 @@ func (s *Store) OrgEnabled(ctx context.Context, projectID uuid.UUID) (bool, erro
 
 	return row.Enabled, nil
 }
+
+// QueryVisibleByOrg returns the projects in orgID readable by userID. The
+// predicate mirrors HasAccess so the two can never disagree about visibility.
+func (s *Store) QueryVisibleByOrg(ctx context.Context, orgID uuid.UUID, userID uuid.UUID) ([]projectbus.Project, error) {
+	data := struct {
+		OrgID  string `db:"org_id"`
+		UserID string `db:"user_id"`
+	}{
+		OrgID:  orgID.String(),
+		UserID: userID.String(),
+	}
+
+	const q = `
+	SELECT id, org_id, name, color, retention_days, date_created, date_updated
+	FROM projects p
+	WHERE p.org_id = :org_id
+	  AND (
+	      EXISTS (
+	          SELECT 1 FROM org_members m
+	          WHERE m.org_id = p.org_id
+	            AND m.user_id = :user_id
+	            AND m.role IN ('ORG ADMIN', 'SUPER ADMIN')
+	      )
+	      OR
+	      EXISTS (
+	          SELECT 1 FROM user_project_access upa
+	          WHERE upa.project_id = p.id
+	            AND upa.user_id = :user_id
+	      )
+	  )
+	ORDER BY date_created ASC`
+
+	var dbProjects []projectDB
+	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, q, data, &dbProjects); err != nil {
+		return nil, fmt.Errorf("namedqueryslice: %w", err)
+	}
+
+	return toBusProjects(dbProjects), nil
+}

@@ -166,25 +166,50 @@ func (s *Store) QueryByID(ctx context.Context, id uuid.UUID) (logbus.Log, error)
 // afterTs/afterID implement keyset cursor pagination.
 func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int, afterTs *time.Time, afterID *uuid.UUID) ([]logbus.Log, int, error) {
 	data := map[string]any{
-		"project_id": filter.ProjectID.String(),
-		"limit":      limit,
+		"limit": limit,
 	}
 
-	base := `
-	SELECT ` + logColumns + `
-	FROM logs`
+	if len(filter.ProjectIDs) == 0 {
+		data["project_id"] = filter.ProjectID.String()
+	}
 
 	// The count is built as an inner SELECT so a bounded count can wrap it in a
 	// LIMIT. An exact count over a project holding most of the table degenerates
 	// to a sequential scan (~10s at 50M rows), so it is opt-in only.
-	countBase := `SELECT 1 FROM logs`
+	buf := bytes.NewBufferString(`
+	SELECT ` + logColumns + `
+	FROM logs`)
+	countBuf := bytes.NewBufferString(`SELECT 1 FROM logs`)
 
-	buf := bytes.NewBufferString(base)
-	countBuf := bytes.NewBufferString(countBase)
+	projectPredicate := "project_id = :project_id"
 
-	applyWhere(filter, afterTs, afterID, data, buf, countBuf)
+	// Multi-project reads fan out per project rather than filtering on
+	// project_id = ANY(...). With ORDER BY ts DESC and a LIMIT the ANY form plans
+	// as a parallel sequential scan of the whole table — measured ~10s across ten
+	// projects — because no single index ordering serves it. A LATERAL over the
+	// project list gives one bounded index scan per project and merges them:
+	// 1.7ms for the same query. The global newest N is necessarily inside the
+	// per-project newest N, so the inner bound is safe.
+	if len(filter.ProjectIDs) > 0 {
+		ids := make(dbarray.String, len(filter.ProjectIDs))
+		for i, id := range filter.ProjectIDs {
+			ids[i] = id.String()
+		}
+		data["project_ids"] = ids
+		projectPredicate = "logs.project_id = p.pid"
+	}
+
+	applyWhere(filter, projectPredicate, afterTs, afterID, data, buf, countBuf)
 
 	buf.WriteString(" ORDER BY ts DESC, id DESC LIMIT :limit")
+
+	if len(filter.ProjectIDs) > 0 {
+		buf = bytes.NewBufferString(`
+	SELECT l.*
+	FROM unnest(CAST(:project_ids AS uuid[])) AS p(pid)
+	CROSS JOIN LATERAL (` + buf.String() + `) l
+	ORDER BY l.ts DESC, l.id DESC LIMIT :limit`)
+	}
 
 	var dbLogs []logDB
 	if err := sqldb.NamedQuerySlice(ctx, s.log, s.db, buf.String(), data, &dbLogs); err != nil {
@@ -202,17 +227,29 @@ func (s *Store) Query(ctx context.Context, filter logbus.QueryFilter, limit int,
 
 	// The total uses the same filters but never the cursor condition, so a page
 	// deep into the results still reports the whole matching set.
-	var countQuery string
+	var inner string
 	switch filter.TotalMode {
 	case logbus.TotalExact:
-		countQuery = "SELECT count(1) AS count FROM (" + countBuf.String() + ") t"
+		inner = countBuf.String()
 	default:
 		// Stop counting at the cap. The ORDER BY keeps this on
 		// logs_project_ts_idx instead of falling back to a seq scan.
 		data["count_cap"] = logbus.TotalCap
-		countQuery = "SELECT count(1) AS count FROM (" + countBuf.String() +
-			" ORDER BY ts DESC LIMIT :count_cap) t"
+		inner = countBuf.String() + " ORDER BY ts DESC LIMIT :count_cap"
 	}
+
+	// Same fan-out for the count. Capping per project and again overall still
+	// yields min(actual, cap): below the cap nothing is truncated, and above it
+	// the answer is the cap either way.
+	if len(filter.ProjectIDs) > 0 {
+		inner = `SELECT 1 FROM unnest(CAST(:project_ids AS uuid[])) AS p(pid)
+		CROSS JOIN LATERAL (` + inner + `) l`
+		if filter.TotalMode != logbus.TotalExact {
+			inner += " LIMIT :count_cap"
+		}
+	}
+
+	countQuery := "SELECT count(1) AS count FROM (" + inner + ") t"
 
 	var count struct {
 		Count int `db:"count"`
@@ -266,7 +303,7 @@ func (s *Store) Stats(ctx context.Context, projectID uuid.UUID, sourceType *stri
 
 // applyWhere adds WHERE clauses to both the data query buffer and the count
 // query buffer. The cursor condition is applied to the data buffer only.
-func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUID, data map[string]any, dataBuf, countBuf *bytes.Buffer) {
+func applyWhere(filter logbus.QueryFilter, projectPredicate string, afterTs *time.Time, afterID *uuid.UUID, data map[string]any, dataBuf, countBuf *bytes.Buffer) {
 	writeWhere := func(buf *bytes.Buffer, clause string) {
 		if bytes.Contains(buf.Bytes(), []byte("WHERE")) {
 			buf.WriteString(" AND " + clause)
@@ -275,8 +312,8 @@ func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUI
 		}
 	}
 
-	writeWhere(dataBuf, "project_id = :project_id")
-	writeWhere(countBuf, "project_id = :project_id")
+	writeWhere(dataBuf, projectPredicate)
+	writeWhere(countBuf, projectPredicate)
 
 	if filter.SourceType != nil {
 		data["source_type"] = *filter.SourceType

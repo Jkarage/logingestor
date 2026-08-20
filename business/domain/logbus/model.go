@@ -121,6 +121,10 @@ const TotalCap = 10000
 type QueryFilter struct {
 	ProjectID uuid.UUID
 
+	// ProjectIDs selects the org-wide read path across several projects. When
+	// set it replaces ProjectID, and the store fans out per project.
+	ProjectIDs []uuid.UUID
+
 	// Levels matches any of the given levels. Empty means all.
 	Levels []Level
 
