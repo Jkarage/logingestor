@@ -50,6 +50,17 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/integrations", a.orgAggregate, authen, orgAdmin)
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/rules", a.listRulesByOrg, authen, orgAdmin)
 
+	// Alert history and lifecycle. Org-admin, matching the org-wide rule list.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/alerts", a.queryAlerts, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/alerts/{alert_id}/acknowledge", a.acknowledgeAlert, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/alerts/{alert_id}/resolve", a.resolveAlert, authen, orgAdmin)
+
+	// Maintenance windows suppress delivery without disabling rules.
+	mw := "/orgs/{org_id}/maintenance-windows"
+	app.HandlerFunc(http.MethodGet, version, mw, a.queryMaintenance, authen, orgAdmin)
+	app.HandlerFunc(http.MethodPost, version, mw, a.createMaintenance, authen, orgAdmin)
+	app.HandlerFunc(http.MethodDelete, version, mw+"/{window_id}", a.deleteMaintenance, authen, orgAdmin)
+
 	// Project-scoped connection CRUD.
 	base := "/orgs/{org_id}/projects/{project_id}/integrations"
 	app.HandlerFunc(http.MethodGet, version, base, a.list, authen, projRead)

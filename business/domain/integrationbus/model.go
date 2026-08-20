@@ -90,29 +90,58 @@ type AlertRule struct {
 	ConnectionID uuid.UUID
 	UserID       *uuid.UUID // creator/owner; nil for legacy rows
 	Name         string
-	Level        string
-	IsActive     bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+
+	// Level is retained so pre-condition rows keep a readable severity. The
+	// Condition is what actually decides whether a rule fires.
+	Level string
+
+	Condition Condition
+
+	// DedupWindowSeconds is how long an open alert stays quiet after notifying.
+	DedupWindowSeconds int
+
+	// SnoozeUntil silences the rule until this instant, without disabling it.
+	SnoozeUntil *time.Time
+
+	IsActive  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// DedupWindow returns the rule's dedup window, falling back to the default when
+// unset so a legacy row still collapses repeats.
+func (r AlertRule) DedupWindow() time.Duration {
+	if r.DedupWindowSeconds <= 0 {
+		return DefaultDedupWindow
+	}
+	return time.Duration(r.DedupWindowSeconds) * time.Second
 }
 
 // NewAlertRule contains the information needed to create a new alert rule. The
 // rule's project is fixed by the route; the connection must live in it.
 type NewAlertRule struct {
-	OrgID        uuid.UUID
-	ProjectID    uuid.UUID
-	ConnectionID uuid.UUID
-	UserID       uuid.UUID
-	Name         string
-	Level        string
-	IsActive     bool
+	OrgID              uuid.UUID
+	ProjectID          uuid.UUID
+	ConnectionID       uuid.UUID
+	UserID             uuid.UUID
+	Name               string
+	Level              string
+	Condition          Condition
+	DedupWindowSeconds int
+	IsActive           bool
 }
 
 // UpdateAlertRule contains the optional fields that can be updated on a rule.
 // ProjectID and UserID (owner) are immutable and not updatable.
 type UpdateAlertRule struct {
-	Name         *string
-	Level        *string
-	ConnectionID *uuid.UUID
-	IsActive     *bool
+	Name               *string
+	Level              *string
+	Condition          *Condition
+	DedupWindowSeconds *int
+	ConnectionID       *uuid.UUID
+	IsActive           *bool
+
+	// SnoozeUntil is a double pointer so clearing a snooze is distinguishable
+	// from leaving it in place.
+	SnoozeUntil **time.Time
 }

@@ -253,9 +253,11 @@ func (s *Store) decryptAll(ctx context.Context, dbs []integrationDB) []integrati
 func (s *Store) CreateRule(ctx context.Context, r integrationbus.AlertRule) error {
 	const q = `
 	INSERT INTO alert_rules
-		(id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at)
+		(id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at,
+		 condition, dedup_window_seconds, snooze_until)
 	VALUES
-		(:id, :org_id, :project_id, :connection_id, :user_id, :name, :level, :is_active, :created_at, :updated_at)`
+		(:id, :org_id, :project_id, :connection_id, :user_id, :name, :level, :is_active, :created_at, :updated_at,
+		 :condition, :dedup_window_seconds, :snooze_until)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDBAlertRule(r)); err != nil {
 		return fmt.Errorf("namedexeccontext: %w", err)
@@ -270,11 +272,14 @@ func (s *Store) UpdateRule(ctx context.Context, r integrationbus.AlertRule) erro
 	const q = `
 	UPDATE alert_rules
 	SET
-		name          = :name,
-		level         = :level,
-		connection_id = :connection_id,
-		is_active     = :is_active,
-		updated_at    = :updated_at
+		name                 = :name,
+		level                = :level,
+		connection_id        = :connection_id,
+		is_active            = :is_active,
+		updated_at           = :updated_at,
+		condition            = :condition,
+		dedup_window_seconds = :dedup_window_seconds,
+		snooze_until         = :snooze_until
 	WHERE
 		id = :id`
 
@@ -307,7 +312,8 @@ func (s *Store) QueryRuleByID(ctx context.Context, id uuid.UUID) (integrationbus
 	}{ID: id.String()}
 
 	const q = `
-	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at,
+	       condition, dedup_window_seconds, snooze_until
 	FROM alert_rules
 	WHERE id = :id`
 
@@ -329,7 +335,8 @@ func (s *Store) QueryRulesByProject(ctx context.Context, projectID uuid.UUID) ([
 	}{ProjectID: projectID.String()}
 
 	const q = `
-	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at,
+	       condition, dedup_window_seconds, snooze_until
 	FROM alert_rules
 	WHERE project_id = :project_id
 	ORDER BY created_at ASC`
@@ -355,7 +362,8 @@ func (s *Store) QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]integra
 	}{OrgID: orgID.String()}
 
 	const q = `
-	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at,
+	       condition, dedup_window_seconds, snooze_until
 	FROM alert_rules
 	WHERE org_id = :org_id
 	ORDER BY created_at ASC`
@@ -392,7 +400,8 @@ func (s *Store) QueryMatchingRules(ctx context.Context, projectID uuid.UUID, lev
 
 	// Rules are project-scoped: a project's logs only fire that project's rules.
 	const q = `
-	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at
+	SELECT id, org_id, project_id, connection_id, user_id, name, level, is_active, created_at, updated_at,
+	       condition, dedup_window_seconds, snooze_until
 	FROM alert_rules
 	WHERE project_id = :project_id
 	  AND is_active = true

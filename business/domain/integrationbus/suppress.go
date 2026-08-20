@@ -1,6 +1,7 @@
 package integrationbus
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -150,4 +151,17 @@ func ShouldNotify(in SuppressInput) (bool, SuppressReason) {
 	}
 
 	return false, SuppressDedup
+}
+
+// ErrEventNotFound is returned when no matching alert event exists.
+var ErrEventNotFound = errors.New("alert event not found")
+
+// AlertEventFilter selects alert history.
+type AlertEventFilter struct {
+	OrgID     uuid.UUID
+	ProjectID *uuid.UUID
+	RuleID    *uuid.UUID
+	State     *string
+	Since     *time.Time
+	Limit     int
 }

@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/app/sdk/errs"
@@ -314,4 +315,63 @@ func Test_create_ProjectNotInOrg_404(t *testing.T) {
 	if !ok || e.Code != errs.NotFound {
 		t.Fatalf("expected NotFound, got %T %v", resp, resp)
 	}
+}
+
+// =============================================================================
+// The alerting evaluation surface is exercised by integrationbus' own tests and
+// against a real database; these satisfy the interface so the handler tests keep
+// compiling as it grows.
+
+func (s *memStorer) QueryActiveRules(_ context.Context, projectID uuid.UUID) ([]integrationbus.AlertRule, error) {
+	var out []integrationbus.AlertRule
+	for _, r := range s.rules {
+		if r.ProjectID == projectID && r.IsActive {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (s *memStorer) QueryThresholdRules(context.Context) ([]integrationbus.AlertRule, error) {
+	return nil, nil
+}
+
+func (s *memStorer) QueryOpenEvent(context.Context, uuid.UUID, string) (integrationbus.AlertEvent, error) {
+	return integrationbus.AlertEvent{}, integrationbus.ErrEventNotFound
+}
+
+func (s *memStorer) RecordFiring(_ context.Context, e integrationbus.AlertEvent) (integrationbus.AlertEvent, error) {
+	e.ID = uuid.New()
+	e.State = integrationbus.AlertStateFiring
+	return e, nil
+}
+
+func (s *memStorer) MarkNotified(context.Context, uuid.UUID, time.Time) error { return nil }
+
+func (s *memStorer) AcknowledgeEvent(context.Context, uuid.UUID, uuid.UUID, time.Time) error {
+	return nil
+}
+
+func (s *memStorer) ResolveEvent(context.Context, uuid.UUID, time.Time) error { return nil }
+
+func (s *memStorer) QueryEventByID(context.Context, uuid.UUID) (integrationbus.AlertEvent, error) {
+	return integrationbus.AlertEvent{}, integrationbus.ErrEventNotFound
+}
+
+func (s *memStorer) QueryEvents(context.Context, integrationbus.AlertEventFilter) ([]integrationbus.AlertEvent, error) {
+	return nil, nil
+}
+
+func (s *memStorer) CreateMaintenance(context.Context, integrationbus.MaintenanceWindow) error {
+	return nil
+}
+
+func (s *memStorer) DeleteMaintenance(context.Context, uuid.UUID) error { return nil }
+
+func (s *memStorer) QueryMaintenanceByOrg(context.Context, uuid.UUID) ([]integrationbus.MaintenanceWindow, error) {
+	return nil, nil
+}
+
+func (s *memStorer) QueryActiveMaintenance(context.Context, uuid.UUID, time.Time) ([]integrationbus.MaintenanceWindow, error) {
+	return nil, nil
 }

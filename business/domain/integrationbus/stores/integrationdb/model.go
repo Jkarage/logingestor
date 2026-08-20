@@ -1,8 +1,11 @@
 package integrationdb
 
 import (
+	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/jmoiron/sqlx/types"
 
 	"github.com/google/uuid"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
@@ -22,11 +25,16 @@ type alertRuleDB struct {
 	IsActive     bool       `db:"is_active"`
 	CreatedAt    time.Time  `db:"created_at"`
 	UpdatedAt    time.Time  `db:"updated_at"`
+
+	Condition          types.JSONText `db:"condition"`
+	DedupWindowSeconds int            `db:"dedup_window_seconds"`
+	SnoozeUntil        sql.NullTime   `db:"snooze_until"`
 }
 
 func toDBAlertRule(r integrationbus.AlertRule) alertRuleDB {
 	projectID := r.ProjectID
-	return alertRuleDB{
+
+	db := alertRuleDB{
 		ID:           r.ID,
 		OrgID:        r.OrgID,
 		ProjectID:    &projectID,
@@ -37,7 +45,25 @@ func toDBAlertRule(r integrationbus.AlertRule) alertRuleDB {
 		IsActive:     r.IsActive,
 		CreatedAt:    r.CreatedAt.UTC(),
 		UpdatedAt:    r.UpdatedAt.UTC(),
+
+		DedupWindowSeconds: r.DedupWindowSeconds,
 	}
+
+	// A rule always stores a condition. An unset one is written as the level
+	// equivalent so nothing can persist a rule that never fires.
+	cond := r.Condition
+	if cond.Type == "" {
+		cond = integrationbus.LevelCondition(r.Level)
+	}
+	if encoded, err := integrationbus.MarshalCondition(cond); err == nil {
+		db.Condition = types.JSONText(encoded)
+	}
+
+	if r.SnoozeUntil != nil {
+		db.SnoozeUntil = sql.NullTime{Time: r.SnoozeUntil.UTC(), Valid: true}
+	}
+
+	return db
 }
 
 func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
@@ -45,7 +71,7 @@ func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
 	if db.ProjectID != nil {
 		projectID = *db.ProjectID
 	}
-	return integrationbus.AlertRule{
+	r := integrationbus.AlertRule{
 		ID:           db.ID,
 		OrgID:        db.OrgID,
 		ProjectID:    projectID,
@@ -56,7 +82,27 @@ func toBusAlertRule(db alertRuleDB) integrationbus.AlertRule {
 		IsActive:     db.IsActive,
 		CreatedAt:    db.CreatedAt,
 		UpdatedAt:    db.UpdatedAt,
+
+		DedupWindowSeconds: db.DedupWindowSeconds,
 	}
+
+	// A row whose condition will not parse falls back to its level rather than
+	// becoming a rule that silently never matches anything.
+	if len(db.Condition) > 0 {
+		if cond, err := integrationbus.ParseCondition([]byte(db.Condition)); err == nil {
+			r.Condition = cond
+		}
+	}
+	if r.Condition.Type == "" {
+		r.Condition = integrationbus.LevelCondition(db.Level)
+	}
+
+	if db.SnoozeUntil.Valid {
+		t := db.SnoozeUntil.Time
+		r.SnoozeUntil = &t
+	}
+
+	return r
 }
 
 // integrationDB is the database representation of a configured integration.

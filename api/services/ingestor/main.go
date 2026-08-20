@@ -63,6 +63,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/userbus/stores/userdb"
 	"github.com/jkarage/logingestor/business/domain/viewbus"
 	"github.com/jkarage/logingestor/business/domain/viewbus/stores/viewdb"
+	"github.com/jkarage/logingestor/business/sdk/alerting"
 	"github.com/jkarage/logingestor/business/sdk/auditexport"
 	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
@@ -167,6 +168,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// EncryptionKey must be a 64-character hex string (32 bytes → AES-256).
 			// Generate with: openssl rand -hex 32
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
+		}
+		Alerting struct {
+			// Threshold rules are decided on a timer because a threshold is a
+			// statement about a window, not about any single log.
+			Enabled  bool          `conf:"default:true"`
+			Interval time.Duration `conf:"default:1m"`
 		}
 		AuditExport struct {
 			// URL is the SIEM ingest endpoint. Empty disables export.
@@ -441,6 +448,18 @@ func run(ctx context.Context, log *logger.Logger) error {
 	}
 
 	// -------------------------------------------------------------------------
+	// Start Threshold Alert Evaluator
+
+	if cfg.Alerting.Enabled {
+		log.Info(ctx, "startup", "status", "threshold alert evaluator started",
+			"interval", cfg.Alerting.Interval.String())
+
+		go runThresholdAlerts(retentionCtx, log, integrationBus, alerting.NewCounter(logStorage), cfg.Alerting.Interval)
+	} else {
+		log.Info(ctx, "startup", "status", "threshold alert evaluator disabled")
+	}
+
+	// -------------------------------------------------------------------------
 	// Start API Service
 	log.Info(ctx, "startup", "status", "initializing V1 API support")
 
@@ -601,6 +620,39 @@ func runAuditExport(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg au
 				return
 			}
 			log.Error(ctx, "audit export failed", "msg", err)
+		}
+	}
+}
+
+// runThresholdAlerts evaluates threshold alert rules on an interval until ctx is
+// cancelled.
+//
+// Threshold rules cannot be decided from an ingest batch: "twenty errors in five
+// minutes" is a property of the window, not of the log that happens to be
+// twentieth. A failed pass is logged and retried on the next tick — re-notifying
+// is governed by each rule's dedup window, so a missed pass cannot cause a storm.
+func runThresholdAlerts(ctx context.Context, log *logger.Logger, bus *integrationbus.Business, counter integrationbus.ThresholdCounter, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		fired, err := bus.EvaluateThresholds(ctx, counter)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error(ctx, "threshold alerts failed", "msg", err)
+			continue
+		}
+
+		if fired > 0 {
+			log.Info(ctx, "threshold alerts fired", "count", fired)
 		}
 	}
 }

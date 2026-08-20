@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/google/uuid"
+	"github.com/jkarage/logingestor/business/sdk/sqldb/dbarray"
 	"time"
 
 	"github.com/jkarage/logingestor/business/domain/logbus"
@@ -138,4 +140,50 @@ func (s *Store) Aggregate(ctx context.Context, req logbus.AggregateRequest) ([]l
 	}
 
 	return out, nil
+}
+
+// CountMatching counts logs in a project matching a level/text/source predicate
+// inside a window. It backs threshold alert evaluation.
+//
+// The count is capped so a rule whose predicate matches nearly everything cannot
+// turn one evaluation pass into a full project scan: any result at or above the
+// cap already satisfies every threshold that the cap exceeds.
+func (s *Store) CountMatching(ctx context.Context, projectID uuid.UUID, levels []string, contains, source string, from, to time.Time, cap int) (int, error) {
+	data := map[string]any{
+		"project_id": projectID.String(),
+		"from_ts":    from,
+		"to_ts":      to,
+		"cap":        cap,
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString(`SELECT 1 FROM logs WHERE project_id = :project_id AND ts >= :from_ts AND ts < :to_ts`)
+
+	if len(levels) > 0 {
+		arr := make(dbarray.String, len(levels))
+		copy(arr, levels)
+		data["levels"] = arr
+		buf.WriteString(" AND level = ANY(:levels)")
+	}
+
+	if contains != "" {
+		data["contains"] = "%" + contains + "%"
+		buf.WriteString(" AND message ILIKE :contains")
+	}
+
+	if source != "" {
+		data["source"] = source
+		buf.WriteString(" AND source = :source")
+	}
+
+	q := "SELECT count(1) AS count FROM (" + buf.String() + " ORDER BY ts DESC LIMIT :cap) t"
+
+	var row struct {
+		Count int `db:"count"`
+	}
+	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &row); err != nil {
+		return 0, fmt.Errorf("namedquerystruct: %w", err)
+	}
+
+	return row.Count, nil
 }

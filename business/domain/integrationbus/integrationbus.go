@@ -40,6 +40,21 @@ type Storer interface {
 	QueryRulesByOrg(ctx context.Context, orgID uuid.UUID) ([]AlertRule, error)
 	DisableRulesByConnection(ctx context.Context, connectionID uuid.UUID) error
 	QueryMatchingRules(ctx context.Context, projectID uuid.UUID, levels []string) ([]AlertRule, error)
+	QueryActiveRules(ctx context.Context, projectID uuid.UUID) ([]AlertRule, error)
+	QueryThresholdRules(ctx context.Context) ([]AlertRule, error)
+
+	QueryOpenEvent(ctx context.Context, ruleID uuid.UUID, dedupKey string) (AlertEvent, error)
+	RecordFiring(ctx context.Context, e AlertEvent) (AlertEvent, error)
+	MarkNotified(ctx context.Context, eventID uuid.UUID, at time.Time) error
+	AcknowledgeEvent(ctx context.Context, eventID, userID uuid.UUID, at time.Time) error
+	ResolveEvent(ctx context.Context, eventID uuid.UUID, at time.Time) error
+	QueryEventByID(ctx context.Context, id uuid.UUID) (AlertEvent, error)
+	QueryEvents(ctx context.Context, f AlertEventFilter) ([]AlertEvent, error)
+
+	CreateMaintenance(ctx context.Context, w MaintenanceWindow) error
+	DeleteMaintenance(ctx context.Context, id uuid.UUID) error
+	QueryMaintenanceByOrg(ctx context.Context, orgID uuid.UUID) ([]MaintenanceWindow, error)
+	QueryActiveMaintenance(ctx context.Context, orgID uuid.UUID, at time.Time) ([]MaintenanceWindow, error)
 }
 
 // Business manages the set of APIs for the integration domain.
@@ -214,19 +229,31 @@ func (b *Business) CreateRule(ctx context.Context, nr NewAlertRule) (AlertRule, 
 		return AlertRule{}, fmt.Errorf("createrule: %w", ErrConnectionBadOrg)
 	}
 
+	// An omitted condition means the rule fires at or above its level, which is
+	// what every rule did before conditions existed.
+	cond := nr.Condition
+	if cond.Type == "" {
+		cond = LevelCondition(nr.Level)
+	}
+	if err := cond.Validate(); err != nil {
+		return AlertRule{}, fmt.Errorf("createrule: %w", err)
+	}
+
 	now := time.Now()
 	userID := nr.UserID
 	r := AlertRule{
-		ID:           uuid.New(),
-		OrgID:        nr.OrgID,
-		ProjectID:    nr.ProjectID,
-		ConnectionID: nr.ConnectionID,
-		UserID:       &userID,
-		Name:         nr.Name,
-		Level:        nr.Level,
-		IsActive:     nr.IsActive,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                 uuid.New(),
+		OrgID:              nr.OrgID,
+		ProjectID:          nr.ProjectID,
+		ConnectionID:       nr.ConnectionID,
+		UserID:             &userID,
+		Name:               nr.Name,
+		Level:              nr.Level,
+		Condition:          cond,
+		DedupWindowSeconds: nr.DedupWindowSeconds,
+		IsActive:           nr.IsActive,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 
 	if err := b.storer.CreateRule(ctx, r); err != nil {
@@ -264,6 +291,25 @@ func (b *Business) UpdateRule(ctx context.Context, r AlertRule, ur UpdateAlertRu
 	if ur.IsActive != nil {
 		r.IsActive = *ur.IsActive
 	}
+	if ur.Condition != nil {
+		if err := ur.Condition.Validate(); err != nil {
+			return AlertRule{}, fmt.Errorf("updaterule: %w", err)
+		}
+		r.Condition = *ur.Condition
+	}
+	if ur.DedupWindowSeconds != nil {
+		r.DedupWindowSeconds = *ur.DedupWindowSeconds
+	}
+	if ur.SnoozeUntil != nil {
+		r.SnoozeUntil = *ur.SnoozeUntil
+	}
+
+	// A level change with no explicit condition keeps the two consistent: a
+	// level rule must not keep firing on its old severity.
+	if ur.Level != nil && ur.Condition == nil && r.Condition.Type == ConditionLevel {
+		r.Condition = LevelCondition(r.Level)
+	}
+
 	r.UpdatedAt = time.Now()
 
 	if err := b.storer.UpdateRule(ctx, r); err != nil {
@@ -360,63 +406,136 @@ func (b *Business) SendAlert(ctx context.Context, connectionID uuid.UUID, payloa
 	return nil
 }
 
-// FireAlerts finds all active rules for the project matching any level present
-// in the batch and delivers one alert per rule, using the most severe matching
-// log as the representative (annotated with how many others matched). Rules are
-// project-scoped, so a project's logs only route through connections that
-// project owns. Querying rules once per batch — rather than per log — keeps a
-// 10k-record ingest from turning into 10k rule queries and 10k provider calls.
+// FireAlerts evaluates a project's active rules against a batch of logs and
+// delivers whatever survives suppression.
+//
+// Threshold rules are skipped here on purpose: they are a statement about a time
+// window, which a single batch cannot answer. EvaluateThresholds owns those.
 func (b *Business) FireAlerts(ctx context.Context, projectID uuid.UUID, payloads []AlertPayload) error {
 	if len(payloads) == 0 {
 		return nil
 	}
 
-	// The union of rule levels that can fire across the batch is the threshold
-	// of the most severe payload present.
-	top := payloads[0]
-	for _, p := range payloads[1:] {
-		if severityRank(p.Level) > severityRank(top.Level) {
-			top = p
-		}
+	rules, err := b.storer.QueryActiveRules(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("firealerts: queryactiverules: %w", err)
 	}
-	levels := levelThreshold(top.Level)
-	if len(levels) == 0 {
+	if len(rules) == 0 {
 		return nil
 	}
 
-	rules, err := b.storer.QueryMatchingRules(ctx, projectID, levels)
+	now := time.Now()
+
+	// Maintenance is an org-level statement, so it is loaded once per batch
+	// rather than per rule.
+	windows, err := b.storer.QueryActiveMaintenance(ctx, rules[0].OrgID, now)
 	if err != nil {
-		return fmt.Errorf("firealerts: querymatchingrules: %w", err)
+		b.log.Error(ctx, "firealerts: maintenance lookup", "orgID", rules[0].OrgID, "err", err)
 	}
 
 	for _, rule := range rules {
-		ruleRank := severityRank(rule.Level)
-
-		var rep *AlertPayload
-		matched := 0
-		for i := range payloads {
-			p := &payloads[i]
-			if r := severityRank(p.Level); r < ruleRank || r < 0 {
-				continue
-			}
-			matched++
-			if rep == nil || severityRank(p.Level) > severityRank(rep.Level) {
-				rep = p
-			}
-		}
-		if rep == nil {
+		if rule.Condition.NeedsEvaluator() {
 			continue
 		}
 
-		payload := *rep
-		if matched > 1 {
-			payload.Message = fmt.Sprintf("%s (+%d more matching logs in this batch)", payload.Message, matched-1)
+		matched, rep := matchPayloads(rule.Condition, payloads)
+		if matched == 0 {
+			continue
 		}
 
-		if err := b.SendAlert(ctx, rule.ConnectionID, payload); err != nil {
-			b.log.Error(ctx, "firealerts: send alert", "ruleID", rule.ID, "connectionID", rule.ConnectionID, "err", err)
+		if err := b.raise(ctx, rule, *rep, matched, windows, now); err != nil {
+			b.log.Error(ctx, "firealerts: raise", "ruleID", rule.ID, "err", err)
 		}
 	}
 
 	return nil
+}
+
+// raise records a firing, decides whether it may be delivered, and delivers it.
+//
+// The event is recorded before the suppression decision so history stays complete
+// even when nothing is sent — "it fired but I was not paged, why" is exactly the
+// question dedup and maintenance windows make people ask.
+func (b *Business) raise(ctx context.Context, rule AlertRule, rep AlertPayload, matched int, windows []MaintenanceWindow, now time.Time) error {
+	dedupKey := rule.Condition.DedupKey(rep.Level)
+
+	var prior *AlertEvent
+	existing, err := b.storer.QueryOpenEvent(ctx, rule.ID, dedupKey)
+	switch {
+	case err == nil:
+		prior = &existing
+	case errors.Is(err, ErrEventNotFound):
+	default:
+		return fmt.Errorf("queryopenevent: %w", err)
+	}
+
+	summary := rep.Message
+	if matched > 1 {
+		summary = fmt.Sprintf("%s (+%d more matching logs)", summary, matched-1)
+	}
+
+	var sampleLogID *uuid.UUID
+	if id, err := uuid.Parse(rep.LogID); err == nil {
+		sampleLogID = &id
+	}
+
+	event, err := b.storer.RecordFiring(ctx, AlertEvent{
+		RuleID: rule.ID, OrgID: rule.OrgID, ProjectID: rule.ProjectID,
+		DedupKey: dedupKey, Summary: summary, Level: rep.Level,
+		MatchCount: int64(matched), SampleLogID: sampleLogID, LastSeenAt: now,
+	})
+	if err != nil {
+		return fmt.Errorf("recordfiring: %w", err)
+	}
+
+	ok, why := ShouldNotify(SuppressInput{
+		Now:          now,
+		RuleActive:   rule.IsActive,
+		SnoozeUntil:  rule.SnoozeUntil,
+		DedupWindow:  rule.DedupWindow(),
+		ProjectID:    rule.ProjectID,
+		Existing:     prior,
+		Maintenances: windows,
+	})
+	if !ok {
+		b.log.Info(ctx, "alert suppressed", "ruleID", rule.ID, "eventID", event.ID, "reason", string(why))
+		return nil
+	}
+
+	payload := rep
+	payload.Message = summary
+
+	if err := b.SendAlert(ctx, rule.ConnectionID, payload); err != nil {
+		// last_notified_at stays unset, so the next firing retries rather than
+		// being silenced by the dedup window.
+		return fmt.Errorf("sendalert: %w", err)
+	}
+
+	if err := b.storer.MarkNotified(ctx, event.ID, now); err != nil {
+		return fmt.Errorf("marknotified: %w", err)
+	}
+
+	return nil
+}
+
+// matchPayloads counts the logs in a batch satisfying a condition and returns the
+// most severe of them as the representative.
+func matchPayloads(cond Condition, payloads []AlertPayload) (int, *AlertPayload) {
+	var (
+		matched int
+		rep     *AlertPayload
+	)
+
+	for i := range payloads {
+		p := &payloads[i]
+		if !cond.MatchesLog(p.Level, p.Message, p.Source) {
+			continue
+		}
+		matched++
+		if rep == nil || severityRank(p.Level) > severityRank(rep.Level) {
+			rep = p
+		}
+	}
+
+	return matched, rep
 }

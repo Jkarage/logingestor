@@ -217,6 +217,12 @@ type AppAlertRule struct {
 	UserID       *string `json:"userId"`
 	OwnerName    string  `json:"ownerName,omitempty"`
 	OwnerEmail   string  `json:"ownerEmail,omitempty"`
+
+	// Condition is what actually decides whether the rule fires; Level is kept
+	// for display and for rules created before conditions existed.
+	Condition          json.RawMessage `json:"condition"`
+	DedupWindowSeconds int             `json:"dedupWindowSeconds"`
+	SnoozeUntil        *string         `json:"snoozeUntil"`
 }
 
 // ruleResponse wraps a single rule as { "rule": {...} }.
@@ -268,6 +274,18 @@ func toAppAlertRule(bus integrationbus.AlertRule) AppAlertRule {
 		s := bus.UserID.String()
 		r.UserID = &s
 	}
+
+	r.DedupWindowSeconds = int(bus.DedupWindow().Seconds())
+
+	if encoded, err := integrationbus.MarshalCondition(bus.Condition); err == nil {
+		r.Condition = encoded
+	}
+
+	if bus.SnoozeUntil != nil {
+		v := bus.SnoozeUntil.UTC().Format(time.RFC3339)
+		r.SnoozeUntil = &v
+	}
+
 	return r
 }
 
@@ -282,6 +300,11 @@ type NewRuleRequest struct {
 	Level        string `json:"level"`
 	ConnectionID string `json:"connectionId"`
 	IsActive     bool   `json:"isActive"`
+
+	// Condition may be omitted, in which case the rule fires at or above Level —
+	// the behaviour every rule had before conditions existed.
+	Condition          json.RawMessage `json:"condition"`
+	DedupWindowSeconds int             `json:"dedupWindowSeconds"`
 }
 
 // Decode implements web.Decoder.
@@ -298,6 +321,18 @@ func toBusNewRule(orgID, projectID, userID uuid.UUID, req NewRuleRequest) (integ
 	if req.Level == "" {
 		fieldErrors.Add("level", fmt.Errorf("level is required"))
 	}
+
+	// An omitted condition means "fire at or above level", which is what every
+	// rule did before conditions existed.
+	cond := integrationbus.LevelCondition(req.Level)
+	if len(req.Condition) > 0 {
+		parsed, err := integrationbus.ParseCondition(req.Condition)
+		if err != nil {
+			fieldErrors.Add("condition", err)
+		} else {
+			cond = parsed
+		}
+	}
 	if req.ConnectionID == "" {
 		fieldErrors.Add("connectionId", fmt.Errorf("connectionId is required"))
 	}
@@ -312,13 +347,15 @@ func toBusNewRule(orgID, projectID, userID uuid.UUID, req NewRuleRequest) (integ
 	}
 
 	return integrationbus.NewAlertRule{
-		OrgID:        orgID,
-		ProjectID:    projectID,
-		ConnectionID: connID,
-		UserID:       userID,
-		Name:         req.Name,
-		Level:        req.Level,
-		IsActive:     req.IsActive,
+		OrgID:              orgID,
+		ProjectID:          projectID,
+		ConnectionID:       connID,
+		UserID:             userID,
+		Condition:          cond,
+		DedupWindowSeconds: req.DedupWindowSeconds,
+		Name:               req.Name,
+		Level:              req.Level,
+		IsActive:           req.IsActive,
 	}, nil
 }
 
@@ -329,6 +366,12 @@ type UpdateRuleRequest struct {
 	Level        *string `json:"level"`
 	ConnectionID *string `json:"connectionId"`
 	IsActive     *bool   `json:"isActive"`
+
+	Condition          json.RawMessage `json:"condition"`
+	DedupWindowSeconds *int            `json:"dedupWindowSeconds"`
+
+	// SnoozeUntil silences the rule until an instant; null clears the snooze.
+	SnoozeUntil json.RawMessage `json:"snoozeUntil"`
 }
 
 // Decode implements web.Decoder.
@@ -338,9 +381,36 @@ func (r *UpdateRuleRequest) Decode(data []byte) error {
 
 func toBusUpdateRule(req UpdateRuleRequest) (integrationbus.UpdateAlertRule, error) {
 	ur := integrationbus.UpdateAlertRule{
-		Name:     req.Name,
-		Level:    req.Level,
-		IsActive: req.IsActive,
+		Name:               req.Name,
+		Level:              req.Level,
+		IsActive:           req.IsActive,
+		DedupWindowSeconds: req.DedupWindowSeconds,
+	}
+
+	if len(req.Condition) > 0 {
+		cond, err := integrationbus.ParseCondition(req.Condition)
+		if err != nil {
+			return integrationbus.UpdateAlertRule{}, errs.NewFieldErrors("condition", err)
+		}
+		ur.Condition = &cond
+	}
+
+	if len(req.SnoozeUntil) > 0 {
+		if string(req.SnoozeUntil) == "null" {
+			var cleared *time.Time
+			ur.SnoozeUntil = &cleared
+		} else {
+			var raw string
+			if err := json.Unmarshal(req.SnoozeUntil, &raw); err != nil {
+				return integrationbus.UpdateAlertRule{}, errs.NewFieldErrors("snoozeUntil", fmt.Errorf("must be an RFC3339 string or null"))
+			}
+			t, err := time.Parse(time.RFC3339, raw)
+			if err != nil {
+				return integrationbus.UpdateAlertRule{}, errs.NewFieldErrors("snoozeUntil", fmt.Errorf("must be an RFC3339 string or null"))
+			}
+			at := &t
+			ur.SnoozeUntil = &at
+		}
 	}
 
 	if req.ConnectionID != nil {
