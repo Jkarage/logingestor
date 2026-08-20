@@ -15,9 +15,12 @@ import (
 // Go's ServeMux panics when two patterns are ambiguous — neither more specific
 // than the other — and that only happens at registration, so a plain build and
 // unit-test pass will not catch it. This exact failure shipped once:
-// PUT /v1/orgs/{org_id}/sso is ambiguous with the pre-existing
+// PUT /v1/orgs/{org_id}/sso was ambiguous with the then-current
 // PUT /v1/orgs/role/{org_id}, and the service panicked on boot rather than
-// failing anywhere in CI.
+// failing anywhere in CI. The role route has since moved to
+// PUT /v1/orgs/{org_id}/role, which is what makes both registerable — and what
+// this test guards, since re-adding a path with a trailing id would break every
+// route under /v1/orgs/{org_id}/ at once.
 //
 // The buses are left nil on purpose. Route registration must not touch them; if
 // a future handler constructor dereferences a bus, this test fails loudly and

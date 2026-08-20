@@ -50,11 +50,12 @@ func Routes(app *web.App, cfg Config) {
 	// Provider configuration is org-admin only. The client secret is write-only:
 	// it can be set here but is never returned.
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sso", api.query, authen, orgAdmin)
-	// POST rather than PUT: the pre-existing PUT /v1/orgs/role/{org_id} puts the
-	// id in the trailing segment, which Go's mux considers ambiguous with any
-	// PUT /v1/orgs/{org_id}/* pattern and refuses to register. Reshaping that
-	// legacy route would change a contract the frontend already calls, so the
-	// upsert is a POST until it moves to /orgs/{org_id}/role.
+	// The upsert answers to both verbs. PUT is what it is — a full, idempotent
+	// replacement — and was unregisterable while PUT /v1/orgs/role/{org_id}
+	// existed, since ServeMux calls that ambiguous with any
+	// PUT /v1/orgs/{org_id}/* pattern. That route has moved, so PUT is available
+	// again; POST stays because callers are already using it.
+	app.HandlerFunc(http.MethodPut, version, "/orgs/{org_id}/sso", api.upsert, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sso", api.upsert, authen, orgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/sso", api.remove, authen, orgAdmin)
 

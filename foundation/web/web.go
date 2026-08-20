@@ -31,6 +31,16 @@ type HandlerFunc func(ctx context.Context, r *http.Request) Encoder
 // to the logs.
 type Logger func(ctx context.Context, msg string, args ...any)
 
+// Alias rewrites a request path before it is routed. It returns the path to
+// route instead, and false to leave the request alone.
+//
+// This exists because a route that moved cannot simply be registered at both
+// shapes: /v1/orgs/role/{id} and /v1/orgs/{id}/role are ambiguous to
+// http.ServeMux — neither is more specific — so registering both panics at
+// startup. Rewriting before routing keeps the old path working while callers
+// migrate, with exactly one handler behind it.
+type Alias func(method string, urlPath string) (string, bool)
+
 // App is the entrypoint into our application and what configures our context
 // object for each of our http handlers. Feel free to add any configuration
 // data/logic on this App struct.
@@ -41,6 +51,7 @@ type App struct {
 	otmux   http.Handler
 	mw      []MidFunc
 	origins []string
+	aliases []Alias
 }
 
 // NewApp creates an App value that handle a set of routes for the application.
@@ -108,6 +119,33 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the redirect switch to GET, causing 405 on POST/PUT/DELETE routes.
 	r.URL.Path = path.Clean(r.URL.Path)
 
+	// Rewrite retired paths onto their current shape. This runs before routing,
+	// so the request is served by the canonical handler and the trace records
+	// the canonical route.
+	for _, alias := range a.aliases {
+		to, ok := alias(r.Method, r.URL.Path)
+		if !ok {
+			continue
+		}
+
+		if a.log != nil {
+			a.log(r.Context(), "deprecated route", "method", r.Method, "from", r.URL.Path, "to", to)
+		}
+
+		// Deprecation is advertised on the response too, so a caller finds the
+		// remaining call sites in a browser's network tab rather than in our logs.
+		w.Header().Set("Deprecation", "true")
+		w.Header().Set("Link", "<"+to+">; rel=\"successor-version\"")
+
+		r.URL.Path = to
+
+		// RawPath must not survive the rewrite: it would still hold the old path
+		// and EscapedPath would disagree with Path.
+		r.URL.RawPath = ""
+
+		break
+	}
+
 	// WebSocket upgrade requests must bypass otelhttp. otelhttp wraps
 	// http.ResponseWriter in its own type that does not implement
 	// http.Hijacker. gorilla/websocket's upgrader requires Hijacker to
@@ -120,6 +158,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.otmux.ServeHTTP(w, r)
+}
+
+// AddAlias installs a path rewrite that runs before routing. Aliases are tried
+// in the order they were added and the first match wins.
+func (a *App) AddAlias(alias Alias) {
+	a.aliases = append(a.aliases, alias)
 }
 
 // EnableCORS enables CORS preflight requests to work. It prevents the

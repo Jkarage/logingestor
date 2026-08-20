@@ -90,7 +90,7 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 }
 
 // upsert configures or reconfigures the org's provider.
-// PUT /v1/orgs/{org_id}/sso
+// PUT or POST /v1/orgs/{org_id}/sso
 func (a *app) upsert(ctx context.Context, r *http.Request) web.Encoder {
 	orgID, err := uuid.Parse(web.Param(r, "org_id"))
 	if err != nil {
