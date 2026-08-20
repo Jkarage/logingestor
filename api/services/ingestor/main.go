@@ -192,10 +192,18 @@ func run(ctx context.Context, log *logger.Logger) error {
 		SSO struct {
 			// CallbackURL must be registered as a redirect URI with every
 			// configured identity provider.
-			CallbackURL string `conf:"default:http://localhost:3002/v1/auth/sso/callback,env:SSO_CALLBACK_URL"`
+			//
+			// This and CompleteURL default to the deployed hosts rather than to
+			// localhost. A localhost default fails silently and only in
+			// production: the service starts, the config looks set, and the
+			// browser is sent to a machine that is not the user's — which is
+			// exactly what happened here until it was measured.
+			CallbackURL string `conf:"default:https://api.streamlogia.com/v1/auth/sso/callback,env:SSO_CALLBACK_URL"`
 
 			// CompleteURL is the frontend route the browser lands on afterwards.
-			CompleteURL string `conf:"default:http://localhost:3000/sso/complete,env:SSO_COMPLETE_URL"`
+			// It must be the page that performs the code exchange and renders
+			// ?error=, which in this app is /login.
+			CompleteURL string `conf:"default:https://streamlogia.com/login,env:SSO_COMPLETE_URL"`
 
 			// RequireVerifiedEmail rejects identities whose email_verified claim is
 			// not true. Turning this off allows an IdP that lets users self-assert
@@ -203,8 +211,9 @@ func run(ctx context.Context, log *logger.Logger) error {
 			RequireVerifiedEmail bool `conf:"default:true,env:SSO_REQUIRE_VERIFIED_EMAIL"`
 
 			// SCIMBaseURL is this SCIM service's public root, used to build
-			// resource Location values that IdPs follow back.
-			SCIMBaseURL string `conf:"default:http://localhost:3002/v1/scim/v2,env:SCIM_BASE_URL"`
+			// resource Location values that IdPs follow back. The /v1 segment is
+			// part of the path every route in this service is registered under.
+			SCIMBaseURL string `conf:"default:https://api.streamlogia.com/v1/scim/v2,env:SCIM_BASE_URL"`
 		}
 		AI struct {
 			CerebriumAPIKey  string `conf:"default:xxxxxxxxxxxxx,env:AI_CEREBRIUM_API_KEY,mask"`
@@ -214,7 +223,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 			SecretKey     string `conf:"default:sk_test_placeholder,env:STRIPE_SECRET_KEY,mask"`
 			WebhookSecret string `conf:"default:whsec_placeholder,env:STRIPE_WEBHOOK_SECRET,mask"`
 			ProPriceID    string `conf:"default:price_placeholder,env:STRIPE_PRO_PRICE_ID"`
-			AppBaseURL    string `conf:"default:https://app.streamlogia.com,env:APP_BASE_URL"`
+			// AppBaseURL is where Stripe returns the browser after checkout. It is
+			// the app's own host, which is the apex domain — app.streamlogia.com
+			// has no DNS record.
+			AppBaseURL string `conf:"default:https://streamlogia.com,env:APP_BASE_URL"`
 		}
 	}{
 		Version: conf.Version{
@@ -244,6 +256,15 @@ func run(ctx context.Context, log *logger.Logger) error {
 		return fmt.Errorf("generating config for output: %w", err)
 	}
 	log.Info(ctx, "startup", "config", out)
+
+	// Logged on their own because these three are the values that break SSO
+	// without any error to point at: the browser simply lands somewhere else.
+	// Having them in the startup log makes a misconfigured deployment checkable
+	// without reproducing a login.
+	log.Info(ctx, "startup", "status", "sso endpoints",
+		"callback_url", cfg.SSO.CallbackURL,
+		"complete_url", cfg.SSO.CompleteURL,
+		"scim_base_url", cfg.SSO.SCIMBaseURL)
 
 	log.BuildInfo(ctx)
 
