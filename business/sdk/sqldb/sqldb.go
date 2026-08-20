@@ -242,27 +242,43 @@ func namedQuerySlice[T any](ctx context.Context, log *logger.Logger, db sqlx.Ext
 // QueryStruct is a helper function for executing queries that return a
 // single value to be unmarshalled into a struct type where field replacement is necessary.
 func QueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, dest any) error {
-	return namedQueryStruct(ctx, log, db, query, struct{}{}, dest, false)
+	return namedQueryStruct(ctx, log, db, query, struct{}{}, dest, false, false)
 }
 
 // NamedQueryStruct is a helper function for executing queries that return a
 // single value to be unmarshalled into a struct type where field replacement is necessary.
 func NamedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any) error {
-	return namedQueryStruct(ctx, log, db, query, data, dest, false)
+	return namedQueryStruct(ctx, log, db, query, data, dest, false, false)
 }
 
 // NamedQueryStructUsingIn is a helper function for executing queries that return
 // a single value to be unmarshalled into a struct type where field replacement
 // is necessary. Use this if the query has an IN clause.
 func NamedQueryStructUsingIn(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any) error {
-	return namedQueryStruct(ctx, log, db, query, data, dest, true)
+	return namedQueryStruct(ctx, log, db, query, data, dest, true, false)
 }
 
-func namedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any, withIn bool) (err error) {
+// NamedQueryStructAllowNotFound behaves like NamedQueryStruct but does not log
+// when the query matches no row. Use it where a miss is an expected outcome and
+// the caller reports it, rather than a fault worth a line in the service log:
+// the alerting path asks "is there an open alert for this?" on every firing, and
+// the answer is usually no.
+func NamedQueryStructAllowNotFound(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any) error {
+	return namedQueryStruct(ctx, log, db, query, data, dest, false, true)
+}
+
+// namedQueryStruct runs a named query into a single struct. quietNotFound
+// suppresses the log line for a no-rows result; every other error still logs.
+func namedQueryStruct(ctx context.Context, log *logger.Logger, db sqlx.ExtContext, query string, data any, dest any, withIn bool, quietNotFound bool) (err error) {
 	defer func() {
-		if err != nil {
-			log.Infoc(ctx, 6, "database.NamedQueryStruct", "query", query, "ERROR", err)
+		if err == nil {
+			return
 		}
+		if quietNotFound && errors.Is(err, ErrDBNotFound) {
+			return
+		}
+
+		log.Infoc(ctx, 6, "database.NamedQueryStruct", "query", query, "ERROR", err)
 	}()
 
 	ctx, span := otel.AddSpan(ctx, "business.sdk.sqldb.query", attribute.String("query", query))

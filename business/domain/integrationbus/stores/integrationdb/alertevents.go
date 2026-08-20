@@ -124,8 +124,10 @@ func (s *Store) QueryOpenEvent(ctx context.Context, ruleID uuid.UUID, dedupKey s
 	FROM alert_events
 	WHERE rule_id = :rule_id AND dedup_key = :dedup_key AND state <> 'resolved'`
 
+	// Finding nothing is the common case — most firings are the first of their
+	// kind — so the miss is not logged. raise() decides what it means.
 	var db alertEventDB
-	if err := sqldb.NamedQueryStruct(ctx, s.log, s.db, q, data, &db); err != nil {
+	if err := sqldb.NamedQueryStructAllowNotFound(ctx, s.log, s.db, q, data, &db); err != nil {
 		if errors.Is(err, sqldb.ErrDBNotFound) {
 			return integrationbus.AlertEvent{}, fmt.Errorf("db: %w", integrationbus.ErrEventNotFound)
 		}
