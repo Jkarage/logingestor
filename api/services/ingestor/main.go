@@ -24,6 +24,10 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/debug"
 	"github.com/jkarage/logingestor/app/sdk/mux"
 	"github.com/jkarage/logingestor/business/domain/analyzebus"
+	"github.com/jkarage/logingestor/business/domain/annotationbus"
+	"github.com/jkarage/logingestor/business/domain/annotationbus/stores/annotationdb"
+	"github.com/jkarage/logingestor/business/domain/apikeybus"
+	"github.com/jkarage/logingestor/business/domain/apikeybus/stores/apikeydb"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
@@ -403,6 +407,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 	scimBus := scimbus.NewBusiness(log, scimdb.NewStore(log, db))
 
 	viewBus := viewbus.NewBusiness(log, viewdb.NewStore(log, db))
+	annotationBus := annotationbus.NewBusiness(log, annotationdb.NewStore(log, db))
+
+	// API keys are hashed like the SCIM tokens: compared, never recovered.
+	apiKeyBus := apikeybus.NewBusiness(log, apikeydb.NewStore(log, db))
 
 	logOtelExt := logotel.NewExtension()
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
@@ -510,6 +518,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 			SSOBus:         ssoBus,
 			SCIMBus:        scimBus,
 			ViewBus:        viewBus,
+			AnnotationBus:  annotationBus,
+			APIKeyBus:      apiKeyBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

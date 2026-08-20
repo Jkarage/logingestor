@@ -1,6 +1,8 @@
 package build
 
 import (
+	"github.com/jkarage/logingestor/app/domain/annotationapp"
+	"github.com/jkarage/logingestor/app/domain/apikeyapp"
 	"github.com/jkarage/logingestor/app/domain/auditapp"
 	"github.com/jkarage/logingestor/app/domain/billingapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
@@ -95,6 +97,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		Hub:            cfg.LogHub,
 		AllowedOrigins: cfg.AllowedOrigins,
 		UsageBus:       cfg.BusConfig.UsageBus,
+		APIKeyBus:      cfg.BusConfig.APIKeyBus,
 	})
 
 	sourceapp.Routes(app, sourceapp.Config{
@@ -122,6 +125,23 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AuthClient: cfg.IngestorConfig.AuthClient,
 		UsageBus:   cfg.BusConfig.UsageBus,
 		OrgBus:     cfg.BusConfig.OrgBus,
+	})
+
+	annotationapp.Routes(app, annotationapp.Config{
+		Log:           cfg.Log,
+		AuthClient:    cfg.IngestorConfig.AuthClient,
+		AnnotationBus: cfg.BusConfig.AnnotationBus,
+		LogBus:        cfg.BusConfig.LogBus,
+		OrgBus:        cfg.BusConfig.OrgBus,
+		ProjectBus:    cfg.BusConfig.ProjectBus,
+	})
+
+	apikeyapp.Routes(app, apikeyapp.Config{
+		Log:        cfg.Log,
+		AuthClient: cfg.IngestorConfig.AuthClient,
+		APIKeyBus:  cfg.BusConfig.APIKeyBus,
+		OrgBus:     cfg.BusConfig.OrgBus,
+		ProjectBus: cfg.BusConfig.ProjectBus,
 	})
 
 	viewapp.Routes(app, viewapp.Config{

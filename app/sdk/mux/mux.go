@@ -11,6 +11,8 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/analyzebus"
+	"github.com/jkarage/logingestor/business/domain/annotationbus"
+	"github.com/jkarage/logingestor/business/domain/apikeybus"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
@@ -87,6 +89,8 @@ type BusConfig struct {
 	SSOBus         *ssobus.Business
 	SCIMBus        *scimbus.Business
 	ViewBus        *viewbus.Business
+	AnnotationBus  *annotationbus.Business
+	APIKeyBus      *apikeybus.Business
 }
 
 // SSOConfig contains single sign-on endpoint configuration.

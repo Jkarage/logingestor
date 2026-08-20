@@ -41,6 +41,13 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodPut, version, views+"/{view_id}", api.updateView, authen, orgMember)
 	app.HandlerFunc(http.MethodDelete, version, views+"/{view_id}", api.deleteView, authen, orgMember)
 
+	// A permalink is looked up by its slug, which is what travels in a URL.
+	links := "/orgs/{org_id}/permalinks"
+	app.HandlerFunc(http.MethodGet, version, links, api.queryPermalinks, authen, orgMember)
+	app.HandlerFunc(http.MethodPost, version, links, api.createPermalink, authen, orgMember)
+	app.HandlerFunc(http.MethodGet, version, links+"/{slug}", api.queryPermalink, authen, orgMember)
+	app.HandlerFunc(http.MethodDelete, version, links+"/{slug}", api.deletePermalink, authen, orgMember)
+
 	boards := "/orgs/{org_id}/dashboards"
 	app.HandlerFunc(http.MethodGet, version, boards, api.queryDashboards, authen, orgMember)
 	app.HandlerFunc(http.MethodPost, version, boards, api.createDashboard, authen, orgMember)

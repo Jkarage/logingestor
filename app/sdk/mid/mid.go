@@ -31,6 +31,7 @@ const (
 	homeKey
 	trKey
 	sourceKey
+	apiKeyKey
 )
 
 func setClaims(ctx context.Context, claims auth.Claims) context.Context {

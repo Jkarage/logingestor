@@ -811,3 +811,80 @@ CREATE TABLE IF NOT EXISTS ingest_stats_hourly (
 );
 -- Pruning deletes by age across every source, which the primary key cannot serve.
 CREATE INDEX IF NOT EXISTS ingest_stats_hourly_hour_idx ON ingest_stats_hourly (hour);
+
+-- Version: 1.38
+-- Description: Permalinks, log annotations and read-only API keys
+-- Three small tables behind the sharing and programmatic-access surface.
+--
+-- A permalink is a short slug standing for either one log line or a frozen
+-- query, so a link pasted into a chat still opens the same view a week later.
+-- The slug is the lookup key rather than the id because it travels in URLs.
+CREATE TABLE IF NOT EXISTS log_permalinks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    project_id UUID NULL,
+    slug TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL CHECK (kind IN ('log', 'query')),
+    log_id UUID NULL,
+    query JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT log_permalinks_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT log_permalinks_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT log_permalinks_owner_fk FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE,
+    -- A log permalink names a log in a project; a query permalink carries a query.
+    CONSTRAINT log_permalinks_target CHECK (
+        (kind = 'log' AND log_id IS NOT NULL AND project_id IS NOT NULL) OR
+        (kind = 'query' AND log_id IS NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS log_permalinks_org_idx ON log_permalinks (org_id, date_created DESC);
+
+-- There is deliberately no foreign key from log_id to logs: retention deletes
+-- logs, and a permalink to a purged log should report that the log is gone
+-- rather than vanish and turn a shared link into a 404 with no explanation.
+
+-- An annotation is a note anchored in time, either to one log line or to a
+-- moment ("deployed 4.12 here"). Both carry a ts so one index serves the log
+-- view and the chart overlay.
+CREATE TABLE IF NOT EXISTS log_annotations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    project_id UUID NOT NULL,
+    log_id UUID NULL,
+    ts TIMESTAMPTZ NOT NULL,
+    body TEXT NOT NULL,
+    created_by UUID NOT NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date_updated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT log_annotations_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT log_annotations_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT log_annotations_owner_fk FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT log_annotations_body_not_blank CHECK (length(btrim(body)) > 0)
+);
+CREATE INDEX IF NOT EXISTS log_annotations_project_ts_idx ON log_annotations (project_id, ts DESC);
+CREATE INDEX IF NOT EXISTS log_annotations_log_idx ON log_annotations (log_id) WHERE log_id IS NOT NULL;
+
+-- API keys authenticate the read-only query API, which scripts and CI use in
+-- place of a user session. They are read-only by construction: ingest keys live
+-- in sources and are a separate scheme, so a leaked query key cannot write.
+CREATE TABLE IF NOT EXISTS api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NOT NULL,
+    project_id UUID NULL,
+    name TEXT NOT NULL,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by UUID NULL,
+    last_used_at TIMESTAMPTZ NULL,
+    expires_at TIMESTAMPTZ NULL,
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT api_keys_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT api_keys_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+    CONSTRAINT api_keys_owner_fk FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL,
+    CONSTRAINT api_keys_name_not_blank CHECK (length(btrim(name)) > 0)
+);
+-- Authentication looks a key up by hash, so that lookup must be unique and fast.
+CREATE UNIQUE INDEX IF NOT EXISTS api_keys_key_hash_idx ON api_keys (key_hash);
+CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (org_id, date_created DESC);

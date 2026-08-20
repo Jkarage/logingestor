@@ -362,6 +362,38 @@ func (a *app) stats(ctx context.Context, r *http.Request) web.Encoder {
 	return StatsResponse(counts)
 }
 
+// queryByID handles GET /v1/projects/{project_id}/logs/{log_id}.
+//
+// This is what a log permalink resolves against, so the not-found case carries
+// weight: a link older than the project's retention is expected to 404, and the
+// client says so rather than showing an empty view.
+func (a *app) queryByID(ctx context.Context, r *http.Request) web.Encoder {
+	projectID, err := uuid.Parse(web.Param(r, "project_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	logID, err := uuid.Parse(web.Param(r, "log_id"))
+	if err != nil {
+		return errs.New(errs.InvalidArgument, mid.ErrInvalidID)
+	}
+
+	l, err := a.logBus.QueryByID(ctx, logID)
+	if err != nil {
+		if errors.Is(err, logbus.ErrNotFound) {
+			return errs.New(errs.NotFound, err)
+		}
+		return errs.Errorf(errs.Internal, "querybyid: %s", err)
+	}
+
+	// A log id is global, so the project in the path is what scopes access to it.
+	if l.ProjectID != projectID {
+		return errs.New(errs.NotFound, logbus.ErrNotFound)
+	}
+
+	return toAppLogEntry(l)
+}
+
 // analyze handles POST /v1/projects/{project_id}/logs/{log_id}/analyze.
 func (a *app) analyze(ctx context.Context, r *http.Request) web.Encoder {
 	projectID, err := uuid.Parse(web.Param(r, "project_id"))

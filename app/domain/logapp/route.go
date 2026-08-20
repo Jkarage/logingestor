@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/authclient"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/analyzebus"
+	"github.com/jkarage/logingestor/business/domain/apikeybus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
@@ -25,6 +26,10 @@ type Config struct {
 	UsageBus       usagebus.ExtBusiness
 	Hub            *Hub
 	AllowedOrigins []string
+
+	// APIKeyBus authenticates the public query API. Nil leaves those routes
+	// unregistered, so a deployment can withhold the programmatic surface.
+	APIKeyBus *apikeybus.Business
 }
 
 // Routes adds specific routes for this group.
@@ -44,9 +49,16 @@ func Routes(app *web.App, cfg Config) {
 	// projects are actually readable is resolved inside the handler, so a viewer
 	// sees only what they were granted.
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/logs", a.queryOrg, authen, orgMember)
+
+	// Exports stream, and stream from the same filters as the list above, so
+	// "download what I am looking at" needs no second contract.
+	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/export", a.exportProject, authen, projRead)
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/logs/export", a.exportOrg, authen, orgMember)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/stats", a.stats, authen, projRead)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/timeseries", a.timeseries, authen, projRead)
 	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/aggregate", a.aggregate, authen, projRead)
+	// Reading one log by id. Deep links and permalinks resolve through here.
+	app.HandlerFunc(http.MethodGet, version, "/projects/{project_id}/logs/{log_id}", a.queryByID, authen, projRead)
 	app.HandlerFunc(http.MethodPost, version, "/projects/{project_id}/logs/{log_id}/analyze", a.analyze, authen, projRead)
 
 	// Mints the single-use ticket the WebSocket endpoint below accepts in place
@@ -61,4 +73,17 @@ func Routes(app *web.App, cfg Config) {
 	// Panic recovery is still applied by RawHandlerFuncNoMid itself.
 	// Authentication is handled manually inside a.stream via the ?token= param.
 	app.RawHandlerFuncNoMid(http.MethodGet, version, "/projects/{project_id}/logs/stream", a.stream)
+
+	// The public query API. Authenticated by a read-only API key rather than a
+	// session, for scripts and CI. It is a separate path prefix so the key auth
+	// can never be reached by a route that expects a user, and vice versa.
+	if cfg.APIKeyBus != nil {
+		apiKey := mid.AuthenticateAPIKey(cfg.APIKeyBus, cfg.OrgBus)
+
+		app.HandlerFunc(http.MethodGet, version, "/query/projects", a.queryAPIProjects, apiKey)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs", a.queryAPILogs, apiKey)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs/export", a.exportAPILogs, apiKey)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs/{log_id}", a.queryAPILogByID, apiKey)
+		app.HandlerFunc(http.MethodGet, version, "/query/stats", a.queryAPIStats, apiKey)
+	}
 }

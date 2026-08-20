@@ -155,6 +155,13 @@ type LogEntry struct {
 	Attributes      map[string]any `json:"attributes"`
 }
 
+// Encode implements the encoder interface, so a single log can be a response on
+// its own and not only an element of a page.
+func (app LogEntry) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(app)
+	return data, "application/json", err
+}
+
 func toAppLogEntry(bus logbus.Log) LogEntry {
 	tags := bus.Tags
 	if tags == nil {

@@ -25,6 +25,7 @@ var (
 	ErrDefTooLarge   = fmt.Errorf("definition must be at most %d bytes", MaxDefinitionBytes)
 	ErrBadVisibility = fmt.Errorf("visibility must be %q or %q", VisibilityPrivate, VisibilityOrg)
 	ErrPanelsNotList = errors.New("panels must be a JSON array")
+	ErrSlugTaken     = errors.New("permalink slug already exists")
 )
 
 // Limits on what callers may store. The definition is opaque, so size is the
@@ -212,6 +213,11 @@ type Storer interface {
 	DeleteView(ctx context.Context, id uuid.UUID) error
 	QueryViewByID(ctx context.Context, id uuid.UUID) (SavedView, error)
 	QueryViewsByOrg(ctx context.Context, orgID uuid.UUID) ([]SavedView, error)
+
+	CreatePermalink(ctx context.Context, p Permalink) error
+	DeletePermalink(ctx context.Context, id uuid.UUID) error
+	QueryPermalinkBySlug(ctx context.Context, slug string) (Permalink, error)
+	QueryPermalinksByOrg(ctx context.Context, orgID uuid.UUID) ([]Permalink, error)
 
 	CreateDashboard(ctx context.Context, d Dashboard) error
 	UpdateDashboard(ctx context.Context, d Dashboard) error
