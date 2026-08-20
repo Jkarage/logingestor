@@ -133,26 +133,38 @@ type QueryFilter struct {
 	// Tags requires every listed tag to be present on the row.
 	Tags []string
 
+	// Meta requires every listed key to equal its value in the structured meta
+	// field. Matching is JSONB containment, so values compare as JSON strings —
+	// meta.orderId=123 matches {"orderId":"123"}, not {"orderId":123}.
+	Meta map[string]string
+
 	From       *time.Time
 	To         *time.Time
 	SourceType *string
 	TotalMode  TotalMode
 }
 
-// scanFilters reports whether the filter uses a predicate with no supporting
-// index, which forces a walk of the (project_id, ts DESC) index until the limit
-// is met. On the largest project a miss costs ~345ms bounded to two hours but
-// ~4.2s bounded to a day, so these queries are window-bound.
+// scanFilters reports whether the filter needs a window bound because no plan
+// reliably answers it.
 //
-// levels is included even though a single level can hit logs_level_idx: that
-// only wins when the level is globally rare, and `level = ANY(...)` cannot use
-// the index at all — measured unbounded, a WARN+ERROR filter on the largest
-// project ran past 60s. A composite (project_id, level, ts DESC) index would
-// lift this, and is worth building once retention has shrunk the table.
+// Only tags qualifies now. Search, source, level and meta all became unbounded
+// once their indexes were built — measured over the full retained range with
+// values that match nothing, the worst case: text search 12.9ms via a BitmapOr
+// across the message and source trigram indexes, source 0.1ms, level 0.1ms,
+// meta 2.2ms via the JSONB GIN index.
+//
+// tags is the exception, and not for want of an index. Postgres estimates ~24k
+// matches for an array containment that yields zero, so it picks the ordered
+// (project_id, ts DESC) walk and scans the project — 19.5s. Forcing the GIN
+// path with an OFFSET 0 fence inverts the problem rather than solving it: 1.7ms
+// when the tag is absent, but 26s when the tag matches 287k rows, where the
+// ordered walk takes 9ms. Neither shape is safe for both, and the estimate is
+// what would have to improve. Raising the statistics target on tags did not
+// move it.
 //
 // sourceType is excluded: logs_project_sourcetype_ts_idx covers it directly.
 func (f QueryFilter) scanFilters() bool {
-	return f.Search != nil || f.Source != nil || len(f.Tags) > 0 || len(f.Levels) > 0
+	return len(f.Tags) > 0
 }
 
 // applyScanWindow bounds a query that uses an unindexed predicate. Callers that

@@ -712,3 +712,27 @@ CREATE TABLE IF NOT EXISTS alert_maintenance_windows (
     CONSTRAINT amw_range CHECK (ends_at > starts_at)
 );
 CREATE INDEX IF NOT EXISTS amw_org_window_idx ON alert_maintenance_windows (org_id, starts_at, ends_at);
+
+-- Version: 1.35
+-- Description: Indexes backing full-range log search
+-- These were built against production with CREATE INDEX CONCURRENTLY, which
+-- cannot run here: darwin executes each migration inside a transaction and
+-- Postgres rejects CONCURRENTLY in one. So this migration is a no-op on any
+-- environment that already has them, and a plain (locking) build elsewhere —
+-- acceptable on a fresh or small database, not on a large live one. Build those
+-- by hand, concurrently.
+--
+-- Measured over the full retained range with values that match nothing:
+--   message/source trigram BitmapOr   12.9 ms   (was a 10.9 s sequential scan)
+--   source equality                    0.1 ms
+--   meta containment                   2.2 ms
+-- The trigram pair is what lifts the previous two-hour search window.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS logs_message_trgm_idx ON logs USING gin (message gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS logs_source_trgm_idx ON logs USING gin (source gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS logs_project_source_ts_idx ON logs (project_id, source, ts DESC);
+CREATE INDEX IF NOT EXISTS logs_meta_gin_idx ON logs USING gin (meta jsonb_path_ops);
+-- Kept small and deliberately not relied upon: Postgres mis-estimates array
+-- containment badly enough that it prefers the ordered ts walk, so tag filters
+-- stay window-bound in the application. See QueryFilter.scanFilters.
+CREATE INDEX IF NOT EXISTS logs_tags_gin_idx ON logs USING gin (tags);

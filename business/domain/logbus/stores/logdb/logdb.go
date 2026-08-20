@@ -4,6 +4,7 @@ package logdb
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -314,6 +315,16 @@ func applyWhere(filter logbus.QueryFilter, afterTs *time.Time, afterID *uuid.UUI
 		// @> requires every listed tag, so repeating ?tag= narrows the result.
 		writeWhere(dataBuf, "tags @> :tags")
 		writeWhere(countBuf, "tags @> :tags")
+	}
+
+	if len(filter.Meta) > 0 {
+		// Containment against one JSON object, so every key must match and the
+		// whole predicate resolves through logs_meta_gin_idx in a single lookup.
+		// Encoding cannot fail: the map is string-to-string.
+		encoded, _ := json.Marshal(filter.Meta)
+		data["meta"] = string(encoded)
+		writeWhere(dataBuf, "meta @> :meta")
+		writeWhere(countBuf, "meta @> :meta")
 	}
 
 	if filter.From != nil {

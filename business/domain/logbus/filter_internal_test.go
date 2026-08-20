@@ -17,13 +17,16 @@ func Test_QueryFilter_scanFilters(t *testing.T) {
 		want bool
 	}{
 		{"empty", QueryFilter{}, false},
-		// source_type has a composite index, so it stays unbounded.
+		// Everything below became unbounded once its index was built; measured
+		// over the full range with values matching nothing: search 12.9ms,
+		// source 0.1ms, level 0.1ms, meta 2.2ms.
 		{"source_type only", QueryFilter{SourceType: &st}, false},
-		// levels does not: `level = ANY(...)` cannot use logs_level_idx and ran
-		// past 60s unbounded on the largest project.
-		{"levels", QueryFilter{Levels: []Level{LevelError}}, true},
-		{"search", QueryFilter{Search: &search}, true},
-		{"source", QueryFilter{Source: &source}, true},
+		{"levels", QueryFilter{Levels: []Level{LevelError}}, false},
+		{"search", QueryFilter{Search: &search}, false},
+		{"source", QueryFilter{Source: &source}, false},
+		{"meta", QueryFilter{Meta: map[string]string{"orderId": "1"}}, false},
+		// tags is the exception: no plan is safe for both an absent tag and a
+		// common one, so it stays window-bound.
 		{"tags", QueryFilter{Tags: []string{"k8s"}}, true},
 	}
 
@@ -42,7 +45,7 @@ func Test_QueryFilter_applyScanWindow(t *testing.T) {
 
 	t.Run("no scan filter leaves the range untouched", func(t *testing.T) {
 		st := "app"
-		f := QueryFilter{SourceType: &st}
+		f := QueryFilter{SourceType: &st, Search: &search, Levels: []Level{LevelError}}
 		if err := f.applyScanWindow(now); err != nil {
 			t.Fatalf("applyScanWindow: %v", err)
 		}
@@ -52,7 +55,7 @@ func Test_QueryFilter_applyScanWindow(t *testing.T) {
 	})
 
 	t.Run("scan filter with no from gets one", func(t *testing.T) {
-		f := QueryFilter{Search: &search}
+		f := QueryFilter{Tags: []string{"k8s"}}
 		if err := f.applyScanWindow(now); err != nil {
 			t.Fatalf("applyScanWindow: %v", err)
 		}
@@ -66,7 +69,7 @@ func Test_QueryFilter_applyScanWindow(t *testing.T) {
 
 	t.Run("window at the cap is allowed", func(t *testing.T) {
 		from := now.Add(-MaxRawWindow)
-		f := QueryFilter{Search: &search, From: &from, To: &now}
+		f := QueryFilter{Tags: []string{"k8s"}, From: &from, To: &now}
 		if err := f.applyScanWindow(now); err != nil {
 			t.Errorf("a window exactly at the cap should be allowed: %v", err)
 		}
@@ -77,7 +80,7 @@ func Test_QueryFilter_applyScanWindow(t *testing.T) {
 	// rather than served slowly.
 	t.Run("window past the cap is refused", func(t *testing.T) {
 		from := now.Add(-MaxRawWindow - time.Minute)
-		f := QueryFilter{Search: &search, From: &from, To: &now}
+		f := QueryFilter{Tags: []string{"k8s"}, From: &from, To: &now}
 		if err := f.applyScanWindow(now); !errors.Is(err, ErrWindowTooWide) {
 			t.Errorf("err = %v, want ErrWindowTooWide", err)
 		}
@@ -85,7 +88,7 @@ func Test_QueryFilter_applyScanWindow(t *testing.T) {
 
 	t.Run("explicit to is respected when bounding", func(t *testing.T) {
 		to := now.Add(-48 * time.Hour)
-		f := QueryFilter{Source: strptr("api"), To: &to}
+		f := QueryFilter{Tags: []string{"k8s"}, To: &to}
 		if err := f.applyScanWindow(now); err != nil {
 			t.Fatalf("applyScanWindow: %v", err)
 		}

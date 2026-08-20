@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -240,6 +242,10 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 
 	// tag is repeatable and comma-separated; every tag given must be present.
 	filter.Tags = csvValues(q["tag"])
+
+	// meta.<field>=value filters on the structured payload, e.g.
+	// ?meta.orderId=123&meta.traceId=abc. Every pair must match.
+	filter.Meta = metaFilters(q)
 
 	if fromStr := q.Get("from"); fromStr != "" {
 		t, err := time.Parse(time.RFC3339, fromStr)
@@ -560,4 +566,34 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// metaKeyPattern bounds a meta field name. The value is always bound as a JSON
+// parameter, so this guards against nonsense keys rather than injection.
+var metaKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,128}$`)
+
+// metaFilters collects ?meta.<field>=value pairs from the query string. Keys
+// that do not look like field names are ignored rather than erroring, so an
+// unrelated future parameter beginning "meta." cannot break existing callers.
+func metaFilters(q url.Values) map[string]string {
+	var out map[string]string
+
+	for key, vals := range q {
+		field, ok := strings.CutPrefix(key, "meta.")
+		if !ok || len(vals) == 0 {
+			continue
+		}
+
+		v := strings.TrimSpace(vals[0])
+		if v == "" || !metaKeyPattern.MatchString(field) {
+			continue
+		}
+
+		if out == nil {
+			out = make(map[string]string)
+		}
+		out[field] = v
+	}
+
+	return out
 }
