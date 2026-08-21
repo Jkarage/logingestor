@@ -20,7 +20,8 @@ type Storer interface {
 	Ingest(ctx context.Context, events []Event) (int, error)
 
 	ClaimUnprocessed(ctx context.Context, limit int, maxAttempts int) ([]Event, error)
-	AttachToIssue(ctx context.Context, eventID uuid.UUID, issueID uuid.UUID, fingerprint string, version int) error
+	AttachToIssue(ctx context.Context, eventID uuid.UUID, issueID uuid.UUID, fingerprint string, version int, resolvedStack string) error
+	DetachFromIssue(ctx context.Context, issueID uuid.UUID, count int) error
 	MarkFailed(ctx context.Context, eventID uuid.UUID, reason string, maxAttempts int) error
 
 	UpsertIssue(ctx context.Context, i Issue) (Issue, bool, error)
@@ -34,6 +35,12 @@ type Storer interface {
 	QueryIssueSeries(ctx context.Context, issueID uuid.UUID, from, to time.Time, interval time.Duration) ([]Bucket, error)
 	QueryStats(ctx context.Context, orgID, projectID *uuid.UUID, allOrgs bool, from, to time.Time) (Stats, error)
 	PurgeOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
+
+	// Source maps and the re-grouping they trigger.
+	UpsertArtifact(ctx context.Context, a Artifact, content []byte) error
+	QueryArtifact(ctx context.Context, release, fileName string) ([]byte, error)
+	QueryArtifactsByRelease(ctx context.Context, release string) ([]Artifact, error)
+	MarkReleaseForRegroup(ctx context.Context, release string, belowVersion int) (int64, error)
 }
 
 // Notifier is told about issues worth waking someone for. It is an interface so
@@ -49,12 +56,16 @@ type Business struct {
 	log      *logger.Logger
 	storer   Storer
 	notifier Notifier
+	maps     *sourceMapCache
 }
 
 // NewBusiness constructs a client error business API. notifier may be nil, in
 // which case grouping still happens and nothing is delivered.
 func NewBusiness(log *logger.Logger, storer Storer, notifier Notifier) *Business {
-	return &Business{log: log, storer: storer, notifier: notifier}
+	b := Business{log: log, storer: storer, notifier: notifier}
+	b.maps = newSourceMapCache(storer.QueryArtifact)
+
+	return &b
 }
 
 // Ingest validates, scrubs and stores a batch, returning how many events were
@@ -164,12 +175,31 @@ func (b *Business) ProcessBatch(ctx context.Context, limit int) (int, error) {
 
 // group assigns one event to an issue, creating the issue if this is the first
 // time we have seen this fingerprint.
+//
+// An event that already carries an issue is being grouped a second time, because
+// a source map for its release arrived after it was first filed. That case
+// notifies nobody: the issue is not new, it is the same crash keyed better, and
+// paging a team for every existing issue the moment CI uploads a map would make
+// the feature something people turn off.
 func (b *Business) group(ctx context.Context, e Event) error {
+	regrouped := e.IssueID != nil
+
+	// Resolve the stack before fingerprinting. Minified frames change at every
+	// deploy, so a fingerprint built from them files the same bug again per
+	// release; resolved frames are stable.
+	stack := e.Stack
+	resolvedStack, resolved := ResolveStack(ctx, e.Stack, e.Release, b.maps)
+	version := FingerprintVersion
+	if resolved {
+		stack = resolvedStack
+		version = ResolvedFingerprintVersion
+	}
+
 	ne := NewEvent{
 		Kind:    e.Kind,
 		Name:    e.Name,
 		Message: e.Message,
-		Stack:   e.Stack,
+		Stack:   stack,
 		URL:     e.URL,
 		API:     e.API,
 	}
@@ -221,13 +251,22 @@ func (b *Business) group(ctx context.Context, e Event) error {
 		}
 	}
 
-	if err := b.storer.AttachToIssue(ctx, e.ID, issue.ID, fingerprint, FingerprintVersion); err != nil {
+	if err := b.storer.AttachToIssue(ctx, e.ID, issue.ID, fingerprint, version, resolvedStackOrEmpty(resolved, resolvedStack)); err != nil {
 		return fmt.Errorf("attachtoissue: %w", err)
 	}
 
+	// A re-grouped event may have moved to a different issue. Take it off the old
+	// one, which is deleted if that was its last event — otherwise the list fills
+	// with empty issues nobody can close.
+	if regrouped && *e.IssueID != issue.ID {
+		if err := b.storer.DetachFromIssue(ctx, *e.IssueID, e.SampledCount); err != nil {
+			return fmt.Errorf("detachfromissue: %w", err)
+		}
+	}
+
 	// Notify after the event is attached, so anyone following the alert into the
-	// dashboard finds the issue already complete.
-	if b.notifier != nil {
+	// dashboard finds the issue already complete. A re-group is silent.
+	if b.notifier != nil && !regrouped {
 		switch {
 		case created:
 			b.notifier.IssueOpened(ctx, issue, e)
@@ -238,6 +277,16 @@ func (b *Business) group(ctx context.Context, e Event) error {
 	}
 
 	return nil
+}
+
+// resolvedStackOrEmpty returns the de-minified stack to store, or nothing when
+// there was no map to resolve it with.
+func resolvedStackOrEmpty(resolved bool, stack string) string {
+	if !resolved {
+		return ""
+	}
+
+	return stack
 }
 
 // QueryIssues lists issues matching the filter.

@@ -29,7 +29,7 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 }
 
 const eventColumns = `id, event_id, org_id, project_id, user_id, role, level, kind, name, message,
-	stack, component_stack, release, environment, url, user_agent, api, breadcrumbs,
+	stack, component_stack, resolved_stack, release, environment, url, user_agent, api, breadcrumbs,
 	occurred_at, received_at, fingerprint, issue_id, sampled_count`
 
 // Ingest stores a batch and returns how many rows were new.
@@ -119,15 +119,18 @@ func prefixed(alias, columns string) string {
 	return strings.Join(parts, ", ")
 }
 
-// AttachToIssue records the event's group and marks it done.
-func (s *Store) AttachToIssue(ctx context.Context, eventID, issueID uuid.UUID, fingerprint string, version int) error {
+// AttachToIssue records the event's group and marks it done. The resolved stack
+// is stored beside the raw one, which is kept: it is what the browser actually
+// sent and the only thing that can be resolved again if a better map arrives.
+func (s *Store) AttachToIssue(ctx context.Context, eventID, issueID uuid.UUID, fingerprint string, version int, resolvedStack string) error {
 	const q = `
 	UPDATE client_error_events
 	SET issue_id = $2, fingerprint = $3, fingerprint_version = $4,
+	    resolved_stack = NULLIF($5, ''),
 	    processed_at = NOW(), process_error = NULL
 	WHERE id = $1`
 
-	if _, err := s.db.ExecContext(ctx, q, eventID, issueID, fingerprint, version); err != nil {
+	if _, err := s.db.ExecContext(ctx, q, eventID, issueID, fingerprint, version, resolvedStack); err != nil {
 		return fmt.Errorf("execcontext: %w", err)
 	}
 
@@ -602,4 +605,135 @@ func truncate(s string, n int) string {
 	}
 
 	return s[:n]
+}
+
+// UpsertArtifact stores a source map, replacing any previous upload of the same
+// file for the same release so a re-run of a deploy job is idempotent.
+func (s *Store) UpsertArtifact(ctx context.Context, a clienterrorbus.Artifact, content []byte) error {
+	const q = `
+	INSERT INTO client_error_artifacts
+		(id, release, file_name, content, byte_size, compressed, uploaded_by)
+	VALUES ($1, $2, $3, $4, $5, TRUE, $6)
+	ON CONFLICT (release, file_name) DO UPDATE SET
+		content = EXCLUDED.content,
+		byte_size = EXCLUDED.byte_size,
+		uploaded_by = EXCLUDED.uploaded_by,
+		date_created = NOW()`
+
+	if _, err := s.db.ExecContext(ctx, q, a.ID, a.Release, a.FileName, content, a.ByteSize, a.UploadedBy); err != nil {
+		return fmt.Errorf("execcontext: %w", err)
+	}
+
+	return nil
+}
+
+// QueryArtifact returns one stored map, still compressed. A miss is an empty
+// slice rather than an error: most frames are vendor chunks with no map, and
+// that is not a failure.
+func (s *Store) QueryArtifact(ctx context.Context, release, fileName string) ([]byte, error) {
+	const q = `SELECT content FROM client_error_artifacts WHERE release = $1 AND file_name = $2`
+
+	var content []byte
+	if err := s.db.GetContext(ctx, &content, q, release, fileName); err != nil {
+		if errors.Is(err, sqldb.ErrDBNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getcontext: %w", err)
+	}
+
+	return content, nil
+}
+
+// QueryArtifactsByRelease lists what has been uploaded for a release, without
+// the content.
+func (s *Store) QueryArtifactsByRelease(ctx context.Context, release string) ([]clienterrorbus.Artifact, error) {
+	const q = `
+	SELECT id, release, file_name, byte_size, uploaded_by, date_created
+	FROM client_error_artifacts
+	WHERE release = $1
+	ORDER BY file_name`
+
+	var rows []struct {
+		ID          uuid.UUID `db:"id"`
+		Release     string    `db:"release"`
+		FileName    string    `db:"file_name"`
+		ByteSize    int       `db:"byte_size"`
+		UploadedBy  string    `db:"uploaded_by"`
+		DateCreated time.Time `db:"date_created"`
+	}
+	if err := s.db.SelectContext(ctx, &rows, q, release); err != nil {
+		return nil, fmt.Errorf("selectcontext: %w", err)
+	}
+
+	out := make([]clienterrorbus.Artifact, len(rows))
+	for i, r := range rows {
+		out[i] = clienterrorbus.Artifact{
+			ID: r.ID, Release: r.Release, FileName: r.FileName,
+			ByteSize: r.ByteSize, UploadedBy: r.UploadedBy,
+			DateCreated: r.DateCreated.In(time.Local),
+		}
+	}
+
+	return out, nil
+}
+
+// MarkReleaseForRegroup queues a release's already-grouped events to be grouped
+// again, because a map arrived after they were filed.
+//
+// issue_id is deliberately left in place: the grouping pass reads it to know
+// this is a re-group rather than a first sighting, which is what keeps a map
+// upload from paging the team about every issue it re-keys.
+func (s *Store) MarkReleaseForRegroup(ctx context.Context, release string, belowVersion int) (int64, error) {
+	const q = `
+	UPDATE client_error_events
+	SET processed_at = NULL, process_attempts = 0, process_error = NULL
+	WHERE release = $1 AND fingerprint_version < $2 AND processed_at IS NOT NULL`
+
+	res, err := s.db.ExecContext(ctx, q, release, belowVersion)
+	if err != nil {
+		return 0, fmt.Errorf("execcontext: %w", err)
+	}
+
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+
+	return n, nil
+}
+
+// DetachFromIssue takes an event's weight off an issue it has moved away from,
+// deleting the issue when nothing is left on it.
+func (s *Store) DetachFromIssue(ctx context.Context, issueID uuid.UUID, count int) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begintxx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	const decrement = `
+	UPDATE client_error_issues
+	SET event_count = GREATEST(event_count - $2, 0)
+	WHERE id = $1`
+
+	if _, err := tx.ExecContext(ctx, decrement, issueID, count); err != nil {
+		return fmt.Errorf("decrement: %w", err)
+	}
+
+	// An issue with no events left is not history, it is an artefact of the
+	// re-keying. Its facets go with it by cascade.
+	const cleanup = `
+	DELETE FROM client_error_issues i
+	WHERE i.id = $1
+	  AND NOT EXISTS (SELECT 1 FROM client_error_events e WHERE e.issue_id = i.id)`
+
+	if _, err := tx.ExecContext(ctx, cleanup, issueID); err != nil {
+		return fmt.Errorf("cleanup: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	return nil
 }

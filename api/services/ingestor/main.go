@@ -198,6 +198,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// these, since a frontend crash in that project is an error in it;
 			// a rule that should not can name a source in its condition.
 			AlertingEnabled bool `conf:"default:true,env:CLIENT_ERRORS_ALERTING_ENABLED"`
+
+			// UploadToken authenticates CI's source map uploads. There is no
+			// default: unset refuses every upload, because a deployment that
+			// forgot to configure it should fail to upload rather than accept
+			// maps from anyone.
+			UploadToken string `conf:"env:CLIENT_ERRORS_UPLOAD_TOKEN,mask"`
 		}
 		Alerting struct {
 			// Threshold rules are decided on a timer because a threshold is a
@@ -535,9 +541,10 @@ func run(ctx context.Context, log *logger.Logger) error {
 	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	cfgMux := mux.Config{
-		Build: tag,
-		Log:   log,
-		DB:    db,
+		Build:                  tag,
+		Log:                    log,
+		DB:                     db,
+		ClientErrorUploadToken: cfg.ClientErrors.UploadToken,
 		BusConfig: mux.BusConfig{
 			AuditBus:       auditBus,
 			UserBus:        userBus,

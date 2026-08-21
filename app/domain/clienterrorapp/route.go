@@ -23,6 +23,9 @@ type Config struct {
 	// AllowedOrigins is the set of hosts allowed to post error reports. Empty
 	// means any, which is only appropriate in development.
 	AllowedOrigins []string
+
+	// UploadToken authenticates CI's source map uploads. Empty disables them.
+	UploadToken string
 }
 
 // Routes adds specific routes for this group.
@@ -48,6 +51,12 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodPatch, version, base+"/issues/{issue_id}", api.updateIssue, authen, orgAdmin)
 	app.HandlerFunc(http.MethodGet, version, base+"/stats", api.queryStats, authen, orgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, base, api.purge, authen, orgAdmin)
+
+	// Source maps, uploaded by CI at deploy time and never served to a browser.
+	// Authenticated by a shared token rather than a session: there is no user and
+	// no org involved, and one build serves every tenant.
+	app.HandlerFunc(http.MethodPost, version, "/client-errors/artifacts", api.uploadArtifacts)
+	app.HandlerFunc(http.MethodGet, version, "/client-errors/artifacts", api.queryArtifacts)
 
 	// The cross-org view. Anonymous reports — the crashes on the landing and
 	// login pages — belong to no org, so without this nobody could see them.

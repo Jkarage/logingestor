@@ -44,6 +44,12 @@ const (
 	defaultClientErrorIssueDays = 180
 )
 
+// mapGracePeriod is how long a source map survives with no events referring to
+// its release. CI uploads maps as part of the deploy, which can be minutes
+// before the first user loads the new bundle, so a map is never deleted for
+// being briefly unreferenced.
+const mapGracePeriod = 7 * 24 * time.Hour
+
 // Config bounds one retention run so a scheduled pass makes steady progress
 // without monopolising the database.
 type Config struct {
@@ -309,6 +315,21 @@ func pruneClientErrors(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg
 		if n, err := r.RowsAffected(); err == nil {
 			issues = n
 		}
+	}
+
+	// Source maps for a release nothing refers to any more are dead weight: they
+	// exist only to resolve stacks, and there are no stacks left to resolve.
+	// Releases with no events at all are kept for a grace period so a map
+	// uploaded ahead of a deploy is not deleted before the deploy happens.
+	const dropMaps = `
+	DELETE FROM client_error_artifacts a
+	WHERE a.date_created < $1
+	  AND NOT EXISTS (SELECT 1 FROM client_error_events e WHERE e.release = a.release)`
+
+	if r, err := db.ExecContext(ctx, dropMaps, time.Now().UTC().Add(-mapGracePeriod)); err != nil {
+		return events, issues, fmt.Errorf("prune source maps: %w", err)
+	} else if n, err := r.RowsAffected(); err == nil && n > 0 {
+		log.Info(ctx, "retention pruned source maps", "artifacts", n)
 	}
 
 	if events > 0 || issues > 0 {

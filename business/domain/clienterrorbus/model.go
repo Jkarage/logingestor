@@ -164,17 +164,22 @@ type Event struct {
 	Message        string
 	Stack          string
 	ComponentStack string
-	Release        string
-	Environment    string
-	URL            string
-	UserAgent      string
-	API            *APIContext
-	Breadcrumbs    []Breadcrumb
-	OccurredAt     time.Time
-	ReceivedAt     time.Time
-	Fingerprint    string
-	IssueID        *uuid.UUID
-	SampledCount   int
+
+	// ResolvedStack is the de-minified stack, empty when there was no source map
+	// for the event's release. The raw Stack is always kept.
+	ResolvedStack string
+
+	Release      string
+	Environment  string
+	URL          string
+	UserAgent    string
+	API          *APIContext
+	Breadcrumbs  []Breadcrumb
+	OccurredAt   time.Time
+	ReceivedAt   time.Time
+	Fingerprint  string
+	IssueID      *uuid.UUID
+	SampledCount int
 }
 
 // Issue is a group of events sharing one fingerprint.

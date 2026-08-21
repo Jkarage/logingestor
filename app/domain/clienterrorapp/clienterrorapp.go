@@ -33,6 +33,9 @@ type app struct {
 
 	allowedOrigins []string
 	limiter        *ingestLimiter
+
+	// uploadToken authenticates CI's source map uploads. Empty refuses them.
+	uploadToken string
 }
 
 func newApp(cfg Config) *app {
@@ -49,6 +52,7 @@ func newApp(cfg Config) *app {
 		authClient:     cfg.AuthClient,
 		allowedOrigins: origins,
 		limiter:        newIngestLimiter(),
+		uploadToken:    cfg.UploadToken,
 	}
 }
 

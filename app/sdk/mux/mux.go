@@ -111,6 +111,9 @@ type BillingConfig struct {
 
 // Config contains all the mandatory systems required by handlers.
 type Config struct {
+	// ClientErrorUploadToken authenticates CI's source map uploads.
+	ClientErrorUploadToken string
+
 	Build          string
 	Log            *logger.Logger
 	DB             *sqlx.DB

@@ -24,6 +24,7 @@ type eventDB struct {
 	Message        string         `db:"message"`
 	Stack          string         `db:"stack"`
 	ComponentStack string         `db:"component_stack"`
+	ResolvedStack  *string        `db:"resolved_stack"`
 	Release        string         `db:"release"`
 	Environment    string         `db:"environment"`
 	URL            string         `db:"url"`
@@ -100,6 +101,9 @@ func toBusEvent(db eventDB) clienterrorbus.Event {
 	}
 	if db.Fingerprint != nil {
 		e.Fingerprint = *db.Fingerprint
+	}
+	if db.ResolvedStack != nil {
+		e.ResolvedStack = *db.ResolvedStack
 	}
 
 	if len(db.API) > 0 {

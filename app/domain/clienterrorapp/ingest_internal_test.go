@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/business/domain/clienterrorbus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -376,5 +377,45 @@ func Test_ingestLimiter_SweepsIdleBuckets(t *testing.T) {
 	l.allow("203.0.113.1", 1, now.Add(bucketSweepInterval+time.Minute))
 	if len(l.buckets) != 1 {
 		t.Errorf("buckets = %d after the sweep, want only the active one", len(l.buckets))
+	}
+}
+
+// Source map uploads come from CI, so they authenticate with a shared token
+// rather than a session. An unconfigured token must refuse everything: a
+// deployment that forgot to set it should fail to upload, not accept maps from
+// anyone who asks.
+func Test_uploadArtifacts_TokenAuth(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		presented  string
+		want       int
+	}{
+		{"no token configured", "", "Bearer anything", http.StatusForbidden},
+		{"no header presented", "s3cret", "", http.StatusUnauthorized},
+		{"wrong token", "s3cret", "Bearer wrong", http.StatusUnauthorized},
+		{"not a bearer header", "s3cret", "s3cret", http.StatusUnauthorized},
+		{"correct token", "s3cret", "Bearer s3cret", http.StatusBadRequest}, // past auth, no form
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := &app{uploadToken: c.configured}
+
+			r := httptest.NewRequest(http.MethodPost, "/v1/client-errors/artifacts", strings.NewReader(""))
+			if c.presented != "" {
+				r.Header.Set("Authorization", c.presented)
+			}
+
+			resp := a.uploadArtifacts(context.Background(), r)
+
+			e, ok := resp.(*errs.Error)
+			if !ok {
+				t.Fatalf("expected an error response, got %T", resp)
+			}
+			if got := e.HTTPStatus(); got != c.want {
+				t.Errorf("status = %d, want %d (%v)", got, c.want, e.Code)
+			}
+		})
 	}
 }

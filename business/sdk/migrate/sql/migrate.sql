@@ -1252,3 +1252,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_org_fp_uq
     ON client_error_issues (org_id, fingerprint) WHERE project_id IS NULL AND org_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_anon_fp_uq
     ON client_error_issues (fingerprint) WHERE project_id IS NULL AND org_id IS NULL;
+
+-- Version: 1.42
+-- Description: Source map artifacts and resolved client error stacks
+-- A production stack trace is useless on its own: the whole bundle is one line,
+-- every function is renamed to a letter, and the only real information is a
+-- column offset. The source map the build already emits turns
+-- index-64s.js:1:24817 back into LogsView.jsx:142:8 handleFilterChange.
+--
+-- Maps are stored gzipped because they are megabytes of JSON that compress by
+-- roughly an order of magnitude, and they are stored here rather than served
+-- from the CDN because publishing them publishes the source. Nothing reads this
+-- table except the grouping worker.
+CREATE TABLE IF NOT EXISTS client_error_artifacts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- The release the map belongs to, matched against the release each event
+    -- reports. Uploading the same file for a release again replaces it, so a
+    -- re-run of a deploy job is idempotent.
+    release TEXT NOT NULL,
+
+    -- The generated file the map describes, as it appears in a stack trace —
+    -- "index-64s.js", not "index-64s.js.map". Resolution looks up by this.
+    file_name TEXT NOT NULL,
+
+    content BYTEA NOT NULL,
+    byte_size INT NOT NULL,
+    compressed BOOLEAN NOT NULL DEFAULT TRUE,
+    uploaded_by TEXT NOT NULL DEFAULT '',
+    date_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT client_error_artifacts_uq UNIQUE (release, file_name),
+    CONSTRAINT client_error_artifacts_release_not_blank CHECK (length(btrim(release)) > 0)
+);
+CREATE INDEX IF NOT EXISTS client_error_artifacts_release_idx ON client_error_artifacts (release);
+
+-- The de-minified stack, kept beside the raw one rather than replacing it: the
+-- raw stack is what the browser actually sent and the only thing that can be
+-- re-resolved if a map is uploaded late or turns out to be wrong.
+ALTER TABLE client_error_events ADD COLUMN IF NOT EXISTS resolved_stack TEXT NULL;
+
+-- Re-grouping after a late upload needs to find the events of one release that
+-- were fingerprinted without a map.
+CREATE INDEX IF NOT EXISTS client_error_events_regroup_idx
+    ON client_error_events (release, fingerprint_version)
+    WHERE processed_at IS NOT NULL;

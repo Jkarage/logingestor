@@ -14,6 +14,8 @@ require (
 	go.opentelemetry.io/otel/sdk v1.42.0
 )
 
+require github.com/go-sourcemap/sourcemap v2.1.3+incompatible
+
 require (
 	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect

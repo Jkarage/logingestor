@@ -144,6 +144,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		OrgBus:         cfg.BusConfig.OrgBus,
 		ProjectBus:     cfg.BusConfig.ProjectBus,
 		AllowedOrigins: cfg.AllowedOrigins,
+		UploadToken:    cfg.ClientErrorUploadToken,
 	})
 
 	apikeyapp.Routes(app, apikeyapp.Config{
