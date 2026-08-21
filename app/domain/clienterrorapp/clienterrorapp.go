@@ -36,6 +36,10 @@ type app struct {
 
 	// uploadToken authenticates CI's source map uploads. Empty refuses them.
 	uploadToken string
+
+	// spikeConfig is the same threshold set the background detector uses, so the
+	// endpoint and the alerts cannot disagree about what counts as a spike.
+	spikeConfig clienterrorbus.SpikeConfig
 }
 
 func newApp(cfg Config) *app {
@@ -53,6 +57,7 @@ func newApp(cfg Config) *app {
 		allowedOrigins: origins,
 		limiter:        newIngestLimiter(),
 		uploadToken:    cfg.UploadToken,
+		spikeConfig:    cfg.SpikeConfig,
 	}
 }
 
@@ -327,6 +332,49 @@ func (a *app) statsFor(ctx context.Context, r *http.Request, sc scope) web.Encod
 		Unresolved:    s.Unresolved,
 		AffectedUsers: s.AffectedUsers,
 	}
+}
+
+// querySpikes handles GET /v1/orgs/{org_id}/client-errors/spikes.
+//
+// The same detection the alerts run on, readable on demand. An alert tells you
+// once; this answers "what is spiking right now", which is the question during a
+// rollout.
+func (a *app) querySpikes(ctx context.Context, r *http.Request) web.Encoder {
+	sc, errResp := orgScope(r)
+	if errResp != nil {
+		return errResp
+	}
+
+	cfg := a.spikeConfig
+
+	spikes, err := a.clientErrorBus.QuerySpikes(ctx, cfg)
+	if err != nil {
+		return errs.Errorf(errs.Internal, "queryspikes: %s", err)
+	}
+
+	out := Spikes{
+		Spikes:     []Spike{},
+		Window:     cfg.Window.String(),
+		Baseline:   cfg.Baseline.String(),
+		Multiplier: cfg.Multiplier,
+		MinEvents:  cfg.MinEvents,
+	}
+
+	// Detection is global — one query over the whole table is cheaper than one
+	// per org — so the scope is applied here. There are only ever a handful of
+	// spikes, so filtering in Go costs nothing.
+	for _, s := range spikes {
+		switch {
+		case s.Issue.OrgID == nil || *s.Issue.OrgID != *sc.orgID:
+			continue
+		case sc.projectID != nil && (s.Issue.ProjectID == nil || *s.Issue.ProjectID != *sc.projectID):
+			continue
+		}
+
+		out.Spikes = append(out.Spikes, toAppSpike(s))
+	}
+
+	return out
 }
 
 // purge handles DELETE /v1/orgs/{org_id}/client-errors.

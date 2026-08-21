@@ -534,14 +534,14 @@ func run(ctx context.Context, log *logger.Logger) error {
 		log.Info(ctx, "startup", "status", "threshold alert evaluator disabled")
 	}
 
-	if cfg.ClientErrors.SpikesEnabled {
-		spikeCfg := clienterrorbus.SpikeConfig{
-			Window:     cfg.ClientErrors.SpikeWindow,
-			Baseline:   cfg.ClientErrors.SpikeBaseline,
-			Multiplier: cfg.ClientErrors.SpikeMultiplier,
-			MinEvents:  cfg.ClientErrors.SpikeMinEvents,
-		}
+	spikeCfg := clienterrorbus.SpikeConfig{
+		Window:     cfg.ClientErrors.SpikeWindow,
+		Baseline:   cfg.ClientErrors.SpikeBaseline,
+		Multiplier: cfg.ClientErrors.SpikeMultiplier,
+		MinEvents:  cfg.ClientErrors.SpikeMinEvents,
+	}
 
+	if cfg.ClientErrors.SpikesEnabled {
 		log.Info(ctx, "startup", "status", "client error spike detector started",
 			"interval", cfg.ClientErrors.SpikeInterval.String(),
 			"window", spikeCfg.Window.String(),
@@ -575,6 +575,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		Log:                    log,
 		DB:                     db,
 		ClientErrorUploadToken: cfg.ClientErrors.UploadToken,
+		ClientErrorSpikes:      spikeCfg,
 		BusConfig: mux.BusConfig{
 			AuditBus:       auditBus,
 			UserBus:        userBus,

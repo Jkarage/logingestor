@@ -26,6 +26,10 @@ type Config struct {
 
 	// UploadToken authenticates CI's source map uploads. Empty disables them.
 	UploadToken string
+
+	// SpikeConfig is the threshold set the spike endpoint reports against. It is
+	// the same one the background detector uses, so the two cannot disagree.
+	SpikeConfig clienterrorbus.SpikeConfig
 }
 
 // Routes adds specific routes for this group.
@@ -50,6 +54,7 @@ func Routes(app *web.App, cfg Config) {
 	app.HandlerFunc(http.MethodGet, version, base+"/issues/{issue_id}", api.queryIssue, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPatch, version, base+"/issues/{issue_id}", api.updateIssue, authen, orgAdmin)
 	app.HandlerFunc(http.MethodGet, version, base+"/stats", api.queryStats, authen, orgAdmin)
+	app.HandlerFunc(http.MethodGet, version, base+"/spikes", api.querySpikes, authen, orgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, base, api.purge, authen, orgAdmin)
 
 	// Source maps, uploaded by CI at deploy time and never served to a browser.

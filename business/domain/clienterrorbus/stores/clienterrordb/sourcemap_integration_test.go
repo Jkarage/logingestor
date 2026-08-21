@@ -298,3 +298,47 @@ func Test_SourceMap_Integration_RetentionPrunesOrphans(t *testing.T) {
 		}
 	}
 }
+
+// The resolved stack has to reach the API, or the readability half of the
+// feature is invisible: the dashboard would still be showing index-64s.js:1.
+func Test_SourceMap_Integration_ResolvedStackIsReadable(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	const release = "streamlogia-frontend@2.0.0"
+
+	if _, err := h.bus.UploadArtifact(ctx, clienterrorbus.NewArtifact{
+		Release: release, FileName: "index-64s.js.map", Content: []byte(sourceMapJSON),
+	}); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+
+	who := clienterrorbus.Reporter{OrgID: &h.fixture.OrgID, ProjectID: &h.fixture.ProjectID}
+	if _, err := h.bus.Ingest(ctx, who, []clienterrorbus.NewEvent{minifiedCrash("index-64s.js", release)}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if _, err := h.bus.ProcessBatch(ctx, 10); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	issues, _, err := h.bus.QueryIssues(ctx, clienterrorbus.IssueFilter{OrgID: &h.fixture.OrgID})
+	if err != nil || len(issues) != 1 {
+		t.Fatalf("expected one issue, got %d (err %v)", len(issues), err)
+	}
+
+	events, err := h.bus.QueryIssueEvents(ctx, issues[0].ID, 10)
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+
+	e := events[0]
+	if !strings.Contains(e.ResolvedStack, "LogsView.jsx:142") {
+		t.Errorf("the event does not carry a resolved stack: %q", e.ResolvedStack)
+	}
+	if !strings.Contains(e.Stack, "index-64s.js") {
+		t.Errorf("the raw stack was not kept: %q", e.Stack)
+	}
+}

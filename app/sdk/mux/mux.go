@@ -114,6 +114,10 @@ type Config struct {
 	// ClientErrorUploadToken authenticates CI's source map uploads.
 	ClientErrorUploadToken string
 
+	// ClientErrorSpikes is the spike threshold set, shared by the background
+	// detector and the endpoint that reports what is spiking now.
+	ClientErrorSpikes clienterrorbus.SpikeConfig
+
 	Build          string
 	Log            *logger.Logger
 	DB             *sqlx.DB

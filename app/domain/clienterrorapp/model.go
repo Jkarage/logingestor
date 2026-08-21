@@ -215,12 +215,17 @@ func toAppIssue(i clienterrorbus.Issue) Issue {
 
 // Event is one stored report as the detail view reads it.
 type Event struct {
-	ID             string         `json:"id"`
-	Level          string         `json:"level"`
-	Kind           string         `json:"kind"`
-	Name           string         `json:"name"`
-	Message        string         `json:"message"`
-	Stack          string         `json:"stack"`
+	ID      string `json:"id"`
+	Level   string `json:"level"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+	Message string `json:"message"`
+	Stack   string `json:"stack"`
+
+	// ResolvedStack is the de-minified stack, present once a source map for the
+	// event's release has been uploaded. Render this when it is there and fall
+	// back to Stack when it is not — a report can arrive before its map does.
+	ResolvedStack  string         `json:"resolvedStack,omitempty"`
 	ComponentStack string         `json:"componentStack,omitempty"`
 	Release        string         `json:"release"`
 	Environment    string         `json:"environment"`
@@ -252,6 +257,7 @@ func toAppEvent(e clienterrorbus.Event) Event {
 		Name:           e.Name,
 		Message:        e.Message,
 		Stack:          e.Stack,
+		ResolvedStack:  e.ResolvedStack,
 		ComponentStack: e.ComponentStack,
 		Release:        e.Release,
 		Environment:    e.Environment,
@@ -352,4 +358,51 @@ type Purged struct {
 func (app Purged) Encode() ([]byte, string, error) {
 	data, err := json.Marshal(app)
 	return data, "application/json", err
+}
+
+// Spike is a spiking issue as the dashboard reads it: the issue plus the two
+// numbers that say how bad it has got.
+type Spike struct {
+	Issue
+
+	// Current is how many events landed in the window.
+	Current int64 `json:"current"`
+
+	// Baseline is the rate before it, scaled to the same window length so the
+	// two are directly comparable.
+	Baseline float64 `json:"baseline"`
+
+	// Multiple is Current over Baseline, which is the number worth showing.
+	Multiple float64 `json:"multiple"`
+
+	// Window is how long the current period is, as a duration string.
+	Window string `json:"window"`
+}
+
+// Spikes is the list response shape.
+type Spikes struct {
+	Spikes []Spike `json:"spikes"`
+
+	// Window, Baseline, Multiplier and MinEvents are the thresholds in force, so
+	// a client can explain why something is or is not listed.
+	Window     string  `json:"window"`
+	Baseline   string  `json:"baseline"`
+	Multiplier float64 `json:"multiplier"`
+	MinEvents  int     `json:"minEvents"`
+}
+
+// Encode implements the encoder interface.
+func (app Spikes) Encode() ([]byte, string, error) {
+	data, err := json.Marshal(app)
+	return data, "application/json", err
+}
+
+func toAppSpike(s clienterrorbus.Spike) Spike {
+	return Spike{
+		Issue:    toAppIssue(s.Issue),
+		Current:  s.Current,
+		Baseline: s.Baseline,
+		Multiple: s.Multiple(),
+		Window:   s.Window.String(),
+	}
 }
