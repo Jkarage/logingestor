@@ -19,6 +19,11 @@ type Config struct {
 	APIKeyBus  *apikeybus.Business
 	OrgBus     orgbus.ExtBusiness
 	ProjectBus projectbus.ExtBusiness
+
+	// DefaultRatePerMin and DefaultRateBurst are the query API budget a key with
+	// no limits of its own receives.
+	DefaultRatePerMin int
+	DefaultRateBurst  int
 }
 
 // Routes adds specific routes for this group.

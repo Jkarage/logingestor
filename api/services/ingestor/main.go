@@ -215,6 +215,16 @@ func run(ctx context.Context, log *logger.Logger) error {
 			SpikeMultiplier float64       `conf:"default:5"`
 			SpikeMinEvents  int           `conf:"default:25"`
 		}
+		QueryAPI struct {
+			// The default budget for a read-only API key. A key may carry its own,
+			// which is how one customer's limit is raised without a deploy.
+			//
+			// 120 a minute with double that as burst is generous for a script and
+			// still bounded: the export is priced at twenty, so a caller streaming
+			// exports back to back gets six of them before it waits.
+			RatePerMin int `conf:"default:120,env:QUERY_API_RATE_PER_MIN"`
+			RateBurst  int `conf:"default:240,env:QUERY_API_RATE_BURST"`
+		}
 		Alerting struct {
 			// Threshold rules are decided on a timer because a threshold is a
 			// statement about a window, not about any single log.
@@ -576,6 +586,8 @@ func run(ctx context.Context, log *logger.Logger) error {
 		DB:                     db,
 		ClientErrorUploadToken: cfg.ClientErrors.UploadToken,
 		ClientErrorSpikes:      spikeCfg,
+		QueryRatePerMin:        cfg.QueryAPI.RatePerMin,
+		QueryRateBurst:         cfg.QueryAPI.RateBurst,
 		BusConfig: mux.BusConfig{
 			AuditBus:       auditBus,
 			UserBus:        userBus,

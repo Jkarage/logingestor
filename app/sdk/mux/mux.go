@@ -118,6 +118,11 @@ type Config struct {
 	// detector and the endpoint that reports what is spiking now.
 	ClientErrorSpikes clienterrorbus.SpikeConfig
 
+	// QueryRatePerMin and QueryRateBurst are the default query API budget for a
+	// key that carries none of its own.
+	QueryRatePerMin int
+	QueryRateBurst  int
+
 	Build          string
 	Log            *logger.Logger
 	DB             *sqlx.DB

@@ -31,10 +31,11 @@ const MaxNameLen = 120
 
 // Set of error variables for CRUD operations.
 var (
-	ErrNotFound     = errors.New("api key not found")
-	ErrNameRequired = errors.New("name is required")
-	ErrNameTooLong  = fmt.Errorf("name must be at most %d characters", MaxNameLen)
-	ErrExpiryPast   = errors.New("expiresAt must be in the future")
+	ErrNotFound          = errors.New("api key not found")
+	ErrNameRequired      = errors.New("name is required")
+	ErrNameTooLong       = fmt.Errorf("name must be at most %d characters", MaxNameLen)
+	ErrExpiryPast        = errors.New("expiresAt must be in the future")
+	ErrRateLimitNegative = errors.New("rate limits must be zero (the default) or positive")
 )
 
 // APIKey is a read-only credential for the query API. The raw key is never
@@ -47,9 +48,16 @@ type APIKey struct {
 	// which is what a cross-project export script needs.
 	ProjectID *uuid.UUID
 
-	Name        string
-	KeyPrefix   string
-	KeyHash     string
+	Name      string
+	KeyPrefix string
+	KeyHash   string
+
+	// RateLimitPerMin and RateLimitBurst bound the query API for this key. Zero
+	// means the service default, so a key created before limits existed behaves
+	// like every other one.
+	RateLimitPerMin int
+	RateLimitBurst  int
+
 	IsActive    bool
 	CreatedBy   *uuid.UUID
 	LastUsedAt  *time.Time
@@ -67,6 +75,11 @@ type NewAPIKey struct {
 	ProjectID *uuid.UUID
 	Name      string
 	ExpiresAt *time.Time
+
+	// RateLimitPerMin and RateLimitBurst override the service default for this
+	// key. Zero leaves it on the default.
+	RateLimitPerMin int
+	RateLimitBurst  int
 }
 
 // GenerateKey mints a key. It returns the raw key — shown to the caller exactly
@@ -130,6 +143,10 @@ func (b *Business) Create(ctx context.Context, orgID uuid.UUID, actorID uuid.UUI
 		return APIKey{}, "", ErrExpiryPast
 	}
 
+	if nk.RateLimitPerMin < 0 || nk.RateLimitBurst < 0 {
+		return APIKey{}, "", ErrRateLimitNegative
+	}
+
 	raw, keyHash, keyPrefix, err := GenerateKey()
 	if err != nil {
 		return APIKey{}, "", err
@@ -138,16 +155,18 @@ func (b *Business) Create(ctx context.Context, orgID uuid.UUID, actorID uuid.UUI
 	creator := actorID
 
 	k := APIKey{
-		ID:          uuid.New(),
-		OrgID:       orgID,
-		ProjectID:   nk.ProjectID,
-		Name:        name,
-		KeyPrefix:   keyPrefix,
-		KeyHash:     keyHash,
-		IsActive:    true,
-		CreatedBy:   &creator,
-		ExpiresAt:   nk.ExpiresAt,
-		DateCreated: time.Now(),
+		ID:              uuid.New(),
+		OrgID:           orgID,
+		ProjectID:       nk.ProjectID,
+		Name:            name,
+		KeyPrefix:       keyPrefix,
+		KeyHash:         keyHash,
+		IsActive:        true,
+		CreatedBy:       &creator,
+		ExpiresAt:       nk.ExpiresAt,
+		RateLimitPerMin: nk.RateLimitPerMin,
+		RateLimitBurst:  nk.RateLimitBurst,
+		DateCreated:     time.Now(),
 	}
 
 	if err := b.storer.Create(ctx, k); err != nil {

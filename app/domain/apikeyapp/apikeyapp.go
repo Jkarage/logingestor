@@ -29,7 +29,13 @@ type APIKey struct {
 	ExpiresAt  *string `json:"expiresAt"`
 
 	// Expired is derived so a client does not have to compare clocks.
-	Expired     bool   `json:"expired"`
+	Expired bool `json:"expired"`
+
+	// RateLimitPerMin and RateLimitBurst are this key's query API budget. Zero
+	// means it is on the service default, which the response also reports.
+	RateLimitPerMin int `json:"rateLimitPerMin"`
+	RateLimitBurst  int `json:"rateLimitBurst"`
+
 	DateCreated string `json:"dateCreated"`
 }
 
@@ -42,6 +48,11 @@ func (app APIKey) Encode() ([]byte, string, error) {
 // APIKeys is the list response shape.
 type APIKeys struct {
 	APIKeys []APIKey `json:"apiKeys"`
+
+	// DefaultRatePerMin and DefaultRateBurst are what a key with a zero limit
+	// gets, so a client can render "default (120/min)" rather than "0".
+	DefaultRatePerMin int `json:"defaultRatePerMin"`
+	DefaultRateBurst  int `json:"defaultRateBurst"`
 }
 
 // Encode implements the encoder interface.
@@ -75,6 +86,11 @@ type NewAPIKey struct {
 
 	// ExpiresInDays bounds the key's life. Omitted or 0 never expires.
 	ExpiresInDays int `json:"expiresInDays"`
+
+	// RateLimitPerMin and RateLimitBurst override the default query API budget.
+	// Omitted or 0 leaves the key on the default.
+	RateLimitPerMin int `json:"rateLimitPerMin"`
+	RateLimitBurst  int `json:"rateLimitBurst"`
 }
 
 // Decode implements the decoder interface.
@@ -84,12 +100,14 @@ func (app *NewAPIKey) Decode(data []byte) error {
 
 func toAppAPIKey(k apikeybus.APIKey, now time.Time) APIKey {
 	out := APIKey{
-		ID:          k.ID.String(),
-		Name:        k.Name,
-		KeyPrefix:   k.KeyPrefix,
-		IsActive:    k.IsActive,
-		Expired:     k.Expired(now),
-		DateCreated: k.DateCreated.Format(time.RFC3339),
+		ID:              k.ID.String(),
+		Name:            k.Name,
+		KeyPrefix:       k.KeyPrefix,
+		IsActive:        k.IsActive,
+		Expired:         k.Expired(now),
+		RateLimitPerMin: k.RateLimitPerMin,
+		RateLimitBurst:  k.RateLimitBurst,
+		DateCreated:     k.DateCreated.Format(time.RFC3339),
 	}
 
 	if k.ProjectID != nil {
@@ -115,10 +133,20 @@ func toAppAPIKey(k apikeybus.APIKey, now time.Time) APIKey {
 type app struct {
 	keyBus     *apikeybus.Business
 	projectBus projectbus.ExtBusiness
+
+	// The service default, reported alongside the keys so a zero on a key is
+	// readable rather than mysterious.
+	defaultRatePerMin int
+	defaultRateBurst  int
 }
 
 func newApp(cfg Config) *app {
-	return &app{keyBus: cfg.APIKeyBus, projectBus: cfg.ProjectBus}
+	return &app{
+		keyBus:            cfg.APIKeyBus,
+		projectBus:        cfg.ProjectBus,
+		defaultRatePerMin: cfg.DefaultRatePerMin,
+		defaultRateBurst:  cfg.DefaultRateBurst,
+	}
 }
 
 // query lists the org's keys.
@@ -141,7 +169,7 @@ func (a *app) query(ctx context.Context, r *http.Request) web.Encoder {
 		out[i] = toAppAPIKey(k, now)
 	}
 
-	return APIKeys{APIKeys: out}
+	return APIKeys{APIKeys: out, DefaultRatePerMin: a.defaultRatePerMin, DefaultRateBurst: a.defaultRateBurst}
 }
 
 // create mints a key.
@@ -157,7 +185,11 @@ func (a *app) create(ctx context.Context, r *http.Request) web.Encoder {
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	nk := apikeybus.NewAPIKey{Name: body.Name}
+	nk := apikeybus.NewAPIKey{
+		Name:            body.Name,
+		RateLimitPerMin: body.RateLimitPerMin,
+		RateLimitBurst:  body.RateLimitBurst,
+	}
 
 	if body.ProjectID != "" {
 		projectID, err := uuid.Parse(body.ProjectID)

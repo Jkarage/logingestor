@@ -26,13 +26,16 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 }
 
 type keyDB struct {
-	ID          uuid.UUID  `db:"id"`
-	OrgID       uuid.UUID  `db:"org_id"`
-	ProjectID   *uuid.UUID `db:"project_id"`
-	Name        string     `db:"name"`
-	KeyPrefix   string     `db:"key_prefix"`
-	KeyHash     string     `db:"key_hash"`
-	IsActive    bool       `db:"is_active"`
+	ID              uuid.UUID  `db:"id"`
+	OrgID           uuid.UUID  `db:"org_id"`
+	ProjectID       *uuid.UUID `db:"project_id"`
+	Name            string     `db:"name"`
+	KeyPrefix       string     `db:"key_prefix"`
+	KeyHash         string     `db:"key_hash"`
+	IsActive        bool       `db:"is_active"`
+	RateLimitPerMin int        `db:"rate_limit_per_min"`
+	RateLimitBurst  int        `db:"rate_limit_burst"`
+
 	CreatedBy   *uuid.UUID `db:"created_by"`
 	LastUsedAt  *time.Time `db:"last_used_at"`
 	ExpiresAt   *time.Time `db:"expires_at"`
@@ -44,6 +47,7 @@ func toDB(k apikeybus.APIKey) keyDB {
 		ID: k.ID, OrgID: k.OrgID, ProjectID: k.ProjectID,
 		Name: k.Name, KeyPrefix: k.KeyPrefix, KeyHash: k.KeyHash,
 		IsActive: k.IsActive, CreatedBy: k.CreatedBy,
+		RateLimitPerMin: k.RateLimitPerMin, RateLimitBurst: k.RateLimitBurst,
 		LastUsedAt: k.LastUsedAt, ExpiresAt: k.ExpiresAt,
 		DateCreated: k.DateCreated.UTC(),
 	}
@@ -54,22 +58,26 @@ func toBus(db keyDB) apikeybus.APIKey {
 		ID: db.ID, OrgID: db.OrgID, ProjectID: db.ProjectID,
 		Name: db.Name, KeyPrefix: db.KeyPrefix, KeyHash: db.KeyHash,
 		IsActive: db.IsActive, CreatedBy: db.CreatedBy,
+		RateLimitPerMin: db.RateLimitPerMin, RateLimitBurst: db.RateLimitBurst,
 		LastUsedAt: db.LastUsedAt, ExpiresAt: db.ExpiresAt,
 		DateCreated: db.DateCreated.In(time.Local),
 	}
 }
 
 const columns = `id, org_id, project_id, name, key_prefix, key_hash, is_active,
-	created_by, last_used_at, expires_at, date_created`
+	rate_limit_per_min, rate_limit_burst, created_by, last_used_at, expires_at,
+	date_created`
 
 // Create inserts an API key.
 func (s *Store) Create(ctx context.Context, k apikeybus.APIKey) error {
 	const q = `
 	INSERT INTO api_keys
-		(id, org_id, project_id, name, key_prefix, key_hash, is_active, created_by,
+		(id, org_id, project_id, name, key_prefix, key_hash, is_active,
+		 rate_limit_per_min, rate_limit_burst, created_by,
 		 last_used_at, expires_at, date_created)
 	VALUES
-		(:id, :org_id, :project_id, :name, :key_prefix, :key_hash, :is_active, :created_by,
+		(:id, :org_id, :project_id, :name, :key_prefix, :key_hash, :is_active,
+		 :rate_limit_per_min, :rate_limit_burst, :created_by,
 		 :last_used_at, :expires_at, :date_created)`
 
 	if err := sqldb.NamedExecContext(ctx, s.log, s.db, q, toDB(k)); err != nil {

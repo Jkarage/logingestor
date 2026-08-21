@@ -99,6 +99,9 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		AllowedOrigins: cfg.AllowedOrigins,
 		UsageBus:       cfg.BusConfig.UsageBus,
 		APIKeyBus:      cfg.BusConfig.APIKeyBus,
+
+		QueryRatePerMin: cfg.QueryRatePerMin,
+		QueryRateBurst:  cfg.QueryRateBurst,
 	})
 
 	sourceapp.Routes(app, sourceapp.Config{
@@ -149,11 +152,13 @@ func (all) Add(app *web.App, cfg mux.Config) {
 	})
 
 	apikeyapp.Routes(app, apikeyapp.Config{
-		Log:        cfg.Log,
-		AuthClient: cfg.IngestorConfig.AuthClient,
-		APIKeyBus:  cfg.BusConfig.APIKeyBus,
-		OrgBus:     cfg.BusConfig.OrgBus,
-		ProjectBus: cfg.BusConfig.ProjectBus,
+		Log:               cfg.Log,
+		AuthClient:        cfg.IngestorConfig.AuthClient,
+		APIKeyBus:         cfg.BusConfig.APIKeyBus,
+		OrgBus:            cfg.BusConfig.OrgBus,
+		ProjectBus:        cfg.BusConfig.ProjectBus,
+		DefaultRatePerMin: cfg.QueryRatePerMin,
+		DefaultRateBurst:  cfg.QueryRateBurst,
 	})
 
 	viewapp.Routes(app, viewapp.Config{

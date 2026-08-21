@@ -199,3 +199,60 @@ func Test_APIKey_Integration_TouchLastUsed(t *testing.T) {
 		t.Errorf("last used = %v, want %v", got.LastUsedAt.UTC(), when)
 	}
 }
+
+// A key carries its own query API budget, so one customer can be raised or
+// throttled with an UPDATE rather than a deploy. Zero means the service default,
+// which is what every key created before limits existed carries.
+func Test_APIKey_Integration_RateLimits(t *testing.T) {
+	bus, db, f := newBus(t)
+	ctx := context.Background()
+
+	onDefault, _, err := bus.Create(ctx, f.OrgID, f.UserID, apikeybus.NewAPIKey{Name: "default"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if onDefault.RateLimitPerMin != 0 || onDefault.RateLimitBurst != 0 {
+		t.Errorf("a key with no limits came back with %d/%d", onDefault.RateLimitPerMin, onDefault.RateLimitBurst)
+	}
+
+	throttled, _, err := bus.Create(ctx, f.OrgID, f.UserID, apikeybus.NewAPIKey{
+		Name: "throttled", RateLimitPerMin: 30, RateLimitBurst: 5,
+	})
+	if err != nil {
+		t.Fatalf("create throttled: %v", err)
+	}
+
+	// The limits have to survive the round trip, since the middleware reads them
+	// from the authenticated key rather than from the create response.
+	reread, err := bus.QueryByID(ctx, throttled.ID)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if reread.RateLimitPerMin != 30 || reread.RateLimitBurst != 5 {
+		t.Errorf("limits = %d/%d, want 30/5", reread.RateLimitPerMin, reread.RateLimitBurst)
+	}
+
+	// Authenticate is the path the middleware actually uses.
+	_, raw, err := bus.Create(ctx, f.OrgID, f.UserID, apikeybus.NewAPIKey{Name: "authed", RateLimitPerMin: 90})
+	if err != nil {
+		t.Fatalf("create authed: %v", err)
+	}
+	authed, err := bus.Authenticate(ctx, raw)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	if authed.RateLimitPerMin != 90 {
+		t.Errorf("authenticated key reports %d/min, want 90", authed.RateLimitPerMin)
+	}
+
+	// A negative limit is refused rather than stored as a value nothing can mean.
+	if _, _, err := bus.Create(ctx, f.OrgID, f.UserID, apikeybus.NewAPIKey{Name: "bad", RateLimitPerMin: -1}); !errors.Is(err, apikeybus.ErrRateLimitNegative) {
+		t.Errorf("err = %v, want ErrRateLimitNegative", err)
+	}
+
+	// And the database refuses it too, so no path can write one.
+	if _, err := db.DB.Exec(`
+		UPDATE api_keys SET rate_limit_per_min = -5 WHERE id = $1`, throttled.ID); err == nil {
+		t.Errorf("the database accepted a negative rate limit")
+	}
+}

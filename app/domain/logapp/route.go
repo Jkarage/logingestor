@@ -11,6 +11,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
+	"github.com/jkarage/logingestor/business/sdk/ratelimit"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -30,6 +31,11 @@ type Config struct {
 	// APIKeyBus authenticates the public query API. Nil leaves those routes
 	// unregistered, so a deployment can withhold the programmatic surface.
 	APIKeyBus *apikeybus.Business
+
+	// QueryRatePerMin and QueryRateBurst are the default budget for a key that
+	// carries none of its own.
+	QueryRatePerMin int
+	QueryRateBurst  int
 }
 
 // Routes adds specific routes for this group.
@@ -80,10 +86,18 @@ func Routes(app *web.App, cfg Config) {
 	if cfg.APIKeyBus != nil {
 		apiKey := mid.AuthenticateAPIKey(cfg.APIKeyBus, cfg.OrgBus)
 
-		app.HandlerFunc(http.MethodGet, version, "/query/projects", a.queryAPIProjects, apiKey)
-		app.HandlerFunc(http.MethodGet, version, "/query/logs", a.queryAPILogs, apiKey)
-		app.HandlerFunc(http.MethodGet, version, "/query/logs/export", a.exportAPILogs, apiKey)
-		app.HandlerFunc(http.MethodGet, version, "/query/logs/{log_id}", a.queryAPILogByID, apiKey)
-		app.HandlerFunc(http.MethodGet, version, "/query/stats", a.queryAPIStats, apiKey)
+		// Authenticate, then throttle. The budget belongs to the key, so the
+		// limiter has to know which key it is — and a request that fails to
+		// authenticate should not spend somebody's budget.
+		//
+		// One limiter instance across all five routes, so a caller cannot get five
+		// separate budgets by spreading its traffic over them.
+		throttle := mid.RateLimitAPIKey(ratelimit.New(), cfg.QueryRatePerMin, cfg.QueryRateBurst)
+
+		app.HandlerFunc(http.MethodGet, version, "/query/projects", a.queryAPIProjects, apiKey, throttle)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs", a.queryAPILogs, apiKey, throttle)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs/export", a.exportAPILogs, apiKey, throttle)
+		app.HandlerFunc(http.MethodGet, version, "/query/logs/{log_id}", a.queryAPILogByID, apiKey, throttle)
+		app.HandlerFunc(http.MethodGet, version, "/query/stats", a.queryAPIStats, apiKey, throttle)
 	}
 }

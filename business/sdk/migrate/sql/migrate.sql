@@ -1307,3 +1307,23 @@ CREATE INDEX IF NOT EXISTS client_error_events_regroup_idx
 -- has no rate to compare.
 CREATE INDEX IF NOT EXISTS client_error_events_occurred_idx
     ON client_error_events (occurred_at DESC) WHERE issue_id IS NOT NULL;
+
+-- Version: 1.44
+-- Description: Per-key rate limits for the query API
+-- The read API was the one authenticated path with no limit on it: a script in a
+-- retry loop could hold the connection pool that serves the app. The limit lives
+-- on the key rather than on the address because a key is the thing we can
+-- attribute cost to, and a customer's CI runner does not have a stable address.
+--
+-- Zero means "use the service default", so an existing key needs no backfill and
+-- raising a limit for one customer is an UPDATE rather than a deploy. This
+-- mirrors sources, which already carry their own rate and burst.
+ALTER TABLE api_keys
+    ADD COLUMN IF NOT EXISTS rate_limit_per_min INT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS rate_limit_burst INT NOT NULL DEFAULT 0;
+
+ALTER TABLE api_keys
+    DROP CONSTRAINT IF EXISTS api_keys_rate_limit_non_negative;
+ALTER TABLE api_keys
+    ADD CONSTRAINT api_keys_rate_limit_non_negative
+    CHECK (rate_limit_per_min >= 0 AND rate_limit_burst >= 0);
