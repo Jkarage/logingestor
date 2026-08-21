@@ -6,6 +6,7 @@ import (
 	"github.com/jkarage/logingestor/app/domain/auditapp"
 	"github.com/jkarage/logingestor/app/domain/billingapp"
 	"github.com/jkarage/logingestor/app/domain/checkapp"
+	"github.com/jkarage/logingestor/app/domain/clienterrorapp"
 	"github.com/jkarage/logingestor/app/domain/contactapp"
 	"github.com/jkarage/logingestor/app/domain/ingestapp"
 	"github.com/jkarage/logingestor/app/domain/integrationapp"
@@ -134,6 +135,14 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		LogBus:        cfg.BusConfig.LogBus,
 		OrgBus:        cfg.BusConfig.OrgBus,
 		ProjectBus:    cfg.BusConfig.ProjectBus,
+	})
+
+	clienterrorapp.Routes(app, clienterrorapp.Config{
+		Log:            cfg.Log,
+		AuthClient:     cfg.IngestorConfig.AuthClient,
+		ClientErrorBus: cfg.BusConfig.ClientErrorBus,
+		OrgBus:         cfg.BusConfig.OrgBus,
+		AllowedOrigins: cfg.AllowedOrigins,
 	})
 
 	apikeyapp.Routes(app, apikeyapp.Config{

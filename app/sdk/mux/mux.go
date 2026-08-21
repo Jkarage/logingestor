@@ -14,6 +14,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/annotationbus"
 	"github.com/jkarage/logingestor/business/domain/apikeybus"
 	"github.com/jkarage/logingestor/business/domain/auditbus"
+	"github.com/jkarage/logingestor/business/domain/clienterrorbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/domain/invitationbus"
 	"github.com/jkarage/logingestor/business/domain/logbus"
@@ -90,6 +91,7 @@ type BusConfig struct {
 	SCIMBus        *scimbus.Business
 	ViewBus        *viewbus.Business
 	AnnotationBus  *annotationbus.Business
+	ClientErrorBus *clienterrorbus.Business
 	APIKeyBus      *apikeybus.Business
 }
 

@@ -153,6 +153,11 @@ var (
 
 	// KeyExpired indicates the presented ingest key is past its expiry.
 	KeyExpired = ErrCode{value: 29}
+
+	// PayloadTooLarge indicates the request body exceeded the endpoint's cap.
+	// It is distinct from InvalidArgument because the fix is different: send
+	// less, rather than send something else.
+	PayloadTooLarge = ErrCode{value: 30}
 )
 
 var codeNumbers = map[string]ErrCode{
@@ -186,6 +191,7 @@ var codeNumbers = map[string]ErrCode{
 	"confirmation_required":  ConfirmationRequired,
 	"other_admins_exist":     OtherAdminsExist,
 	"key_expired":            KeyExpired,
+	"payload_too_large":      PayloadTooLarge,
 }
 
 var codeNames = map[ErrCode]string{
@@ -219,6 +225,7 @@ var codeNames = map[ErrCode]string{
 	ConfirmationRequired: "confirmation_required",
 	OtherAdminsExist:     "other_admins_exist",
 	KeyExpired:           "key_expired",
+	PayloadTooLarge:      "payload_too_large",
 }
 
 var httpStatus = map[ErrCode]int{
@@ -252,4 +259,5 @@ var httpStatus = map[ErrCode]int{
 	ConfirmationRequired: http.StatusBadRequest,
 	OtherAdminsExist:     http.StatusConflict,
 	KeyExpired:           http.StatusForbidden,
+	PayloadTooLarge:      http.StatusRequestEntityTooLarge,
 }

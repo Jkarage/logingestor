@@ -31,6 +31,8 @@ import (
 	"github.com/jkarage/logingestor/business/domain/auditbus"
 	"github.com/jkarage/logingestor/business/domain/auditbus/extensions/auditotel"
 	"github.com/jkarage/logingestor/business/domain/auditbus/stores/auditdb"
+	"github.com/jkarage/logingestor/business/domain/clienterrorbus"
+	"github.com/jkarage/logingestor/business/domain/clienterrorbus/stores/clienterrordb"
 	"github.com/jkarage/logingestor/business/domain/integrationbus"
 	"github.com/jkarage/logingestor/business/domain/integrationbus/providers"
 	"github.com/jkarage/logingestor/business/domain/integrationbus/stores/integrationdb"
@@ -176,6 +178,19 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// EncryptionKey must be a 64-character hex string (32 bytes → AES-256).
 			// Generate with: openssl rand -hex 32
 			EncryptionKey string `conf:"default:0000000000000000000000000000000000000000000000000000000000000000,env:INTEGRATION_ENCRYPTION_KEY,mask"`
+		}
+		ClientErrors struct {
+			// The grouping worker. Ingest stores events synchronously and returns
+			// 202; this is what turns them into issues.
+			Enabled   bool          `conf:"default:true"`
+			Interval  time.Duration `conf:"default:5s"`
+			BatchSize int           `conf:"default:200"`
+
+			// EventDays and IssueDays bound retention. Raw events are the bulk and
+			// go first; issues are small and are what a human triages, so they
+			// live longer.
+			EventDays int `conf:"default:30"`
+			IssueDays int `conf:"default:180"`
 		}
 		Alerting struct {
 			// Threshold rules are decided on a timer because a threshold is a
@@ -401,6 +416,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// API keys are hashed like the SCIM tokens: compared, never recovered.
 	apiKeyBus := apikeybus.NewBusiness(log, apikeydb.NewStore(log, db))
 
+	// Client error monitoring. The notifier is nil for now: alert rules and
+	// integration connections are project-scoped and a browser crash has no
+	// project, so routing these through the existing channels needs a modelling
+	// decision rather than a wire-up. Grouping and the dashboard work without it.
+	clientErrorBus := clienterrorbus.NewBusiness(log, clienterrordb.NewStore(log, db), nil)
+
 	logOtelExt := logotel.NewExtension()
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)
 	logBus := logbus.NewBusiness(log, logStorage, logOtelExt, logAlertExt)
@@ -439,6 +460,9 @@ func run(ctx context.Context, log *logger.Logger) error {
 			MaxRuntime:      cfg.Retention.MaxRuntime,
 			AuditDays:       cfg.Retention.AuditDays,
 			SourceStatsDays: cfg.Retention.SourceStatsDays,
+
+			ClientErrorEventDays: cfg.ClientErrors.EventDays,
+			ClientErrorIssueDays: cfg.ClientErrors.IssueDays,
 		}
 
 		log.Info(ctx, "startup", "status", "retention worker started",
@@ -482,6 +506,15 @@ func run(ctx context.Context, log *logger.Logger) error {
 		log.Info(ctx, "startup", "status", "threshold alert evaluator disabled")
 	}
 
+	if cfg.ClientErrors.Enabled {
+		log.Info(ctx, "startup", "status", "client error grouping worker started",
+			"interval", cfg.ClientErrors.Interval.String(), "batch_size", cfg.ClientErrors.BatchSize)
+
+		go runClientErrorGrouping(retentionCtx, log, clientErrorBus, cfg.ClientErrors.Interval, cfg.ClientErrors.BatchSize)
+	} else {
+		log.Info(ctx, "startup", "status", "client error grouping worker disabled")
+	}
+
 	// -------------------------------------------------------------------------
 	// Start API Service
 	log.Info(ctx, "startup", "status", "initializing V1 API support")
@@ -508,6 +541,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			SCIMBus:        scimBus,
 			ViewBus:        viewBus,
 			AnnotationBus:  annotationBus,
+			ClientErrorBus: clientErrorBus,
 			APIKeyBus:      apiKeyBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
@@ -678,6 +712,44 @@ func runThresholdAlerts(ctx context.Context, log *logger.Logger, bus *integratio
 
 		if fired > 0 {
 			log.Info(ctx, "threshold alerts fired", "count", fired)
+		}
+	}
+}
+
+// runClientErrorGrouping turns stored error reports into issues on an interval
+// until ctx is cancelled.
+//
+// The events table is the queue. Grouping is deliberately not done in the
+// request: the browser is waiting, and one report the fingerprinter cannot
+// handle must not be able to fail the batch that carried it. The worker drains
+// in a tight loop while there is a backlog, so a burst from a crash loop is
+// caught up in seconds rather than at the tick rate.
+func runClientErrorGrouping(ctx context.Context, log *logger.Logger, bus *clienterrorbus.Business, interval time.Duration, batchSize int) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		// Keep draining while full batches come back, then wait for the next
+		// tick. The inner bound stops a flood from monopolising the worker.
+		for i := 0; i < 20; i++ {
+			n, err := bus.ProcessBatch(ctx, batchSize)
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				log.Error(ctx, "client error grouping failed", "msg", err)
+				break
+			}
+
+			if n < batchSize {
+				break
+			}
 		}
 	}
 }

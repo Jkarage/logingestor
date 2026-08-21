@@ -1064,3 +1064,137 @@ VALUES
         17
     )
 ON CONFLICT (id) DO NOTHING;
+
+-- Version: 1.40
+-- Description: Client error monitoring — raw events, grouped issues, and facets
+-- Note on the number: darwin parses a version as a float, so this migration is
+-- recorded as 1.4 and sorts after 1.39 by value, not by text. The next one must
+-- be 1.41 or higher for the same reason — 1.5 would also work, but 1.41 keeps
+-- the file order and the applied order the same.
+-- Browser crash reports. These are the application's own errors, not customer
+-- log data, and they are deliberately kept in their own tables: the volume,
+-- retention and privacy rules are all different from logs.
+--
+-- The events table doubles as the ingest queue. There is no broker here, and
+-- adding one to serve a few thousand browser errors a day would be a second
+-- system to operate for no gain; a claim with FOR UPDATE SKIP LOCKED is the
+-- standard Postgres pattern and it is durable, which an in-memory channel is
+-- not — returning 202 for an event that a restart then loses would be a lie.
+CREATE TABLE IF NOT EXISTS client_error_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Client-generated, and the idempotency key: sendBeacon and a retry after a
+    -- failed flush both resend the same event.
+    event_id UUID NOT NULL,
+
+    -- Nullable because errors happen before login, on the landing and auth
+    -- pages, which is exactly where they matter most. An anonymous event has no
+    -- org and is visible only to a super admin.
+    org_id UUID NULL,
+    user_id UUID NULL,
+    role TEXT NULL,
+
+    level TEXT NOT NULL CHECK (level IN ('fatal', 'error', 'warning')),
+    kind TEXT NOT NULL CHECK (kind IN ('unhandled', 'unhandledrejection', 'react', 'api', 'manual')),
+    name TEXT NOT NULL,
+    message TEXT NOT NULL,
+    stack TEXT NOT NULL DEFAULT '',
+    component_stack TEXT NOT NULL DEFAULT '',
+
+    release TEXT NOT NULL DEFAULT '',
+    environment TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+
+    api JSONB NULL,
+    breadcrumbs JSONB NOT NULL DEFAULT '[]'::jsonb,
+
+    -- occurred_at is the browser's clock and cannot be trusted; received_at is
+    -- ours. Both are kept because the gap is itself a signal (a beacon flushed
+    -- after a long unload, a device with a wrong clock).
+    occurred_at TIMESTAMPTZ NOT NULL,
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    -- Grouping is done by the worker, not at ingest, so a poisoned event cannot
+    -- fail the request that delivered it.
+    fingerprint TEXT NULL,
+    fingerprint_version INT NOT NULL DEFAULT 0,
+    issue_id UUID NULL,
+    processed_at TIMESTAMPTZ NULL,
+    process_attempts INT NOT NULL DEFAULT 0,
+    process_error TEXT NULL,
+
+    -- How many identical events this row stands for when the client sampled.
+    -- Totals stay honest without storing every occurrence.
+    sampled_count INT NOT NULL DEFAULT 1 CHECK (sampled_count >= 1),
+
+    CONSTRAINT client_error_events_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT client_error_events_user_fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+-- Idempotency. A duplicate delivery is a no-op insert, not a double count.
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_events_event_id_uq ON client_error_events (event_id);
+
+-- The queue claim: only unprocessed rows, oldest first.
+CREATE INDEX IF NOT EXISTS client_error_events_unprocessed_idx
+    ON client_error_events (received_at) WHERE processed_at IS NULL;
+
+-- Reading an issue's recent events, and pruning by age.
+CREATE INDEX IF NOT EXISTS client_error_events_issue_time_idx ON client_error_events (issue_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS client_error_events_received_idx ON client_error_events (received_at);
+CREATE INDEX IF NOT EXISTS client_error_events_org_time_idx ON client_error_events (org_id, occurred_at DESC);
+
+-- An issue is one fingerprint. Scoped per org so two tenants hitting the same
+-- bug triage it independently, and so a deletion for one org cannot remove the
+-- other's history. Anonymous events group together under a null org.
+CREATE TABLE IF NOT EXISTS client_error_issues (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id UUID NULL,
+    fingerprint TEXT NOT NULL,
+
+    title TEXT NOT NULL,
+    culprit TEXT NOT NULL DEFAULT '',
+    level TEXT NOT NULL,
+    kind TEXT NOT NULL,
+
+    status TEXT NOT NULL DEFAULT 'unresolved' CHECK (status IN ('unresolved', 'resolved', 'ignored')),
+
+    -- regressed marks an issue that came back after being resolved. It is
+    -- separate from status because the alert is about the transition, while the
+    -- status is about what a human decided.
+    regressed BOOLEAN NOT NULL DEFAULT FALSE,
+
+    event_count BIGINT NOT NULL DEFAULT 0,
+    first_seen_at TIMESTAMPTZ NOT NULL,
+    last_seen_at TIMESTAMPTZ NOT NULL,
+    resolved_at TIMESTAMPTZ NULL,
+    assignee_id UUID NULL,
+    sample_event_id UUID NULL,
+
+    CONSTRAINT client_error_issues_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT client_error_issues_assignee_fk FOREIGN KEY (assignee_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+-- One issue per fingerprint per org. A partial unique index handles the
+-- anonymous bucket, because NULL org_id would otherwise never collide.
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_org_fp_uq
+    ON client_error_issues (org_id, fingerprint) WHERE org_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_anon_fp_uq
+    ON client_error_issues (fingerprint) WHERE org_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS client_error_issues_org_seen_idx ON client_error_issues (org_id, last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS client_error_issues_status_idx ON client_error_issues (org_id, status, last_seen_at DESC);
+
+-- Distinct users, orgs and releases per issue. A counter column cannot answer
+-- "how many people hit this" without knowing whether it has seen this person
+-- before, so the set is stored and counted; at browser-error volume these
+-- tables are tiny.
+CREATE TABLE IF NOT EXISTS client_error_issue_facets (
+    issue_id UUID NOT NULL,
+    facet TEXT NOT NULL CHECK (facet IN ('user', 'org', 'release')),
+    value TEXT NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT client_error_issue_facets_pkey PRIMARY KEY (issue_id, facet, value),
+    CONSTRAINT client_error_issue_facets_issue_fk FOREIGN KEY (issue_id) REFERENCES client_error_issues (id) ON DELETE CASCADE
+);
+

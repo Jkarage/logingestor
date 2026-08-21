@@ -36,6 +36,14 @@ const keepForever = -1
 // migration and still keeps the table trivially small.
 const defaultSourceStatsDays = 14
 
+// Client error retention. Raw reports are diagnostic and lose value quickly;
+// the issue they group into is the durable record and outlives them, which is
+// why the two are separate numbers.
+const (
+	defaultClientErrorEventDays = 30
+	defaultClientErrorIssueDays = 180
+)
+
 // Config bounds one retention run so a scheduled pass makes steady progress
 // without monopolising the database.
 type Config struct {
@@ -58,6 +66,13 @@ type Config struct {
 	// They back source health, which only ever reads the last 24 hours, so this
 	// is short by design and negative keeps them forever. Zero means the default.
 	SourceStatsDays int
+
+	// ClientErrorEventDays and ClientErrorIssueDays bound client error
+	// monitoring. Raw browser reports are the bulk and age out first; the issues
+	// they group into are small, are what a human triages, and keep their
+	// first-seen history, so they live longer. Negative keeps either forever.
+	ClientErrorEventDays int
+	ClientErrorIssueDays int
 }
 
 // DefaultConfig is a conservative pass: ~2M rows or 10 minutes, whichever comes
@@ -74,6 +89,12 @@ func (c Config) withDefaults() Config {
 	if c.SourceStatsDays == 0 {
 		c.SourceStatsDays = defaultSourceStatsDays
 	}
+	if c.ClientErrorEventDays == 0 {
+		c.ClientErrorEventDays = defaultClientErrorEventDays
+	}
+	if c.ClientErrorIssueDays == 0 {
+		c.ClientErrorIssueDays = defaultClientErrorIssueDays
+	}
 	return c
 }
 
@@ -87,6 +108,12 @@ type Result struct {
 	// part of Total: those rows are derived counters, not ingested data, and
 	// pruning them must not consume the run's row budget.
 	SourceStatsDeleted int64
+
+	// ClientErrorEventsDeleted and ClientErrorIssuesDeleted count pruned browser
+	// error records. Also outside Total: they are our own diagnostics, not
+	// customer data, and must not consume the budget that drains logs.
+	ClientErrorEventsDeleted int64
+	ClientErrorIssuesDeleted int64
 
 	// Incomplete is true when the run stopped on its row or time budget, meaning
 	// expired rows remain and the next run should continue.
@@ -191,11 +218,17 @@ func Run(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (Resu
 		return res, err
 	}
 
+	res.ClientErrorEventsDeleted, res.ClientErrorIssuesDeleted, err = pruneClientErrors(ctx, log, db, cfg)
+	if err != nil {
+		return res, err
+	}
+
 	log.Info(ctx, "retention complete",
 		"infra_deleted", res.InfraDeleted,
 		"app_deleted", res.AppDeleted,
 		"audit_deleted", res.AuditDeleted,
 		"source_stats_deleted", res.SourceStatsDeleted,
+		"client_error_events_deleted", res.ClientErrorEventsDeleted,
 		"elapsed", time.Since(start).String())
 
 	return res, nil
@@ -230,6 +263,61 @@ func pruneSourceStats(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg 
 	}
 
 	return deleted, nil
+}
+
+// pruneClientErrors ages out browser error reports and the issues they grouped
+// into.
+//
+// Events go by when we received them, not by when the browser says they
+// happened, so a device with a wrong clock cannot keep a row alive or delete it
+// early. Issues go by last seen: an issue nobody has hit for six months is
+// history, and deleting it takes its facets with it by cascade.
+//
+// The two deletes are ordered events-then-issues so an issue is never removed
+// while its events still point at it.
+func pruneClientErrors(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (int64, int64, error) {
+	var events, issues int64
+
+	if expires(cfg.ClientErrorEventDays) {
+		cutoff := time.Now().UTC().Add(-time.Duration(cfg.ClientErrorEventDays) * 24 * time.Hour)
+
+		const q = `DELETE FROM client_error_events WHERE received_at < $1`
+
+		r, err := db.ExecContext(ctx, q, cutoff)
+		if err != nil {
+			return 0, 0, fmt.Errorf("prune client error events: %w", err)
+		}
+		if n, err := r.RowsAffected(); err == nil {
+			events = n
+		}
+	}
+
+	if expires(cfg.ClientErrorIssueDays) {
+		cutoff := time.Now().UTC().Add(-time.Duration(cfg.ClientErrorIssueDays) * 24 * time.Hour)
+
+		// Only issues nothing points at any more: an old issue that still has a
+		// recent event is still live, whatever its last_seen says.
+		const q = `
+		DELETE FROM client_error_issues i
+		WHERE i.last_seen_at < $1
+		  AND NOT EXISTS (SELECT 1 FROM client_error_events e WHERE e.issue_id = i.id)`
+
+		r, err := db.ExecContext(ctx, q, cutoff)
+		if err != nil {
+			return events, 0, fmt.Errorf("prune client error issues: %w", err)
+		}
+		if n, err := r.RowsAffected(); err == nil {
+			issues = n
+		}
+	}
+
+	if events > 0 || issues > 0 {
+		log.Info(ctx, "retention pruned client errors",
+			"event_days", cfg.ClientErrorEventDays, "events", events,
+			"issue_days", cfg.ClientErrorIssueDays, "issues", issues)
+	}
+
+	return events, issues, nil
 }
 
 // purgeAudit ages out audit records, in batches like the log passes. There is no
