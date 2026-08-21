@@ -888,3 +888,179 @@ CREATE TABLE IF NOT EXISTS api_keys (
 -- Authentication looks a key up by hash, so that lookup must be unique and fast.
 CREATE UNIQUE INDEX IF NOT EXISTS api_keys_key_hash_idx ON api_keys (key_hash);
 CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (org_id, date_created DESC);
+
+-- Version: 1.39
+-- Description: Integration provider catalog — seven new providers, and the
+-- original ten moved under migration control
+-- The catalog is the API's own list of what can be configured, and a row is only
+-- reachable if a Caller is registered for the same id — Create refuses an
+-- unknown provider — so these land together with their implementations.
+--
+-- The first ten rows are not new. They were only ever inserted by seed.sql,
+-- which also inserts sample users, so a deployment that ran migrations without
+-- seeding got an empty catalog and no integrations at all. They are product
+-- data, not sample data, so they belong here. ON CONFLICT makes this a no-op
+-- wherever they already exist, including production.
+--
+-- The seven that follow were chosen for coverage rather than count: Teams and
+-- Google Chat are the two chat destinations a business customer is most likely
+-- to already live in, Mattermost is the self-hosted answer to the same
+-- question, WhatsApp reaches a phone in the markets where SMS is the fallback
+-- rather than the norm, and GitHub and Linear put an alert where the person who
+-- has to fix it already works.
+INSERT INTO integration_providers (id, name, icon, type, description, fields, sort_order)
+VALUES
+    (
+        'slack',
+        'Slack',
+        '💬',
+        'Messaging',
+        'Send alerts to Slack channels via webhook.',
+        '[{"k": "webhookUrl", "ph": "https://hooks.slack.com/services/...", "label": "Webhook URL"}]',
+        1
+    ),
+    (
+        'discord',
+        'Discord',
+        '🎮',
+        'Messaging',
+        'Forward log alerts to Discord via webhook.',
+        '[{"k": "webhookUrl", "ph": "https://discord.com/api/webhooks/...", "label": "Webhook URL"}]',
+        2
+    ),
+    (
+        'telegram',
+        'Telegram',
+        '✈️',
+        'Messaging',
+        'Receive alerts as Telegram bot messages.',
+        '[{"k": "botToken", "ph": "123456:ABC...", "label": "Bot Token"}, {"k": "chatId", "ph": "-100123", "label": "Chat ID"}]',
+        3
+    ),
+    (
+        'pagerduty',
+        'PagerDuty',
+        '🚨',
+        'Incident',
+        'Auto-create PagerDuty incidents on critical errors.',
+        '[{"k": "apiKey", "ph": "u+xxxxxxxx", "label": "API Key"}, {"k": "serviceId", "ph": "P1234AB", "label": "Service ID"}]',
+        4
+    ),
+    (
+        'webhook',
+        'Webhook',
+        '🔗',
+        'Custom',
+        'POST structured JSON to any HTTP endpoint.',
+        '[{"k": "url", "ph": "https://yourapp.com/hook", "label": "Target URL"}, {"k": "secret", "ph": "optional HMAC secret", "label": "Secret"}]',
+        5
+    ),
+    (
+        'email',
+        'Email',
+        '📧',
+        'Notify',
+        'Send email alerts when log events trigger.',
+        '[{"k": "to", "ph": "team@co.com", "label": "To Address"}]',
+        6
+    ),
+    (
+        'opsgenie',
+        'OpsGenie',
+        '🔔',
+        'Incident',
+        'Create OpsGenie alerts for on-call escalation.',
+        '[{"k": "apiKey", "ph": "xxxx-xxxx-xxxx", "label": "API Key"}]',
+        7
+    ),
+    (
+        'jira',
+        'Jira',
+        '🧩',
+        'Ticketing',
+        'Open Jira issues automatically on ERROR logs.',
+        '[{"k": "domain", "ph": "org.atlassian.net", "label": "Domain"}, {"k": "email", "ph": "you@org.com", "label": "Account Email"}, {"k": "token", "ph": "ATATT...", "label": "API Token"}, {"k": "project", "ph": "ENG", "label": "Project Key"}]',
+        8
+    ),
+    (
+        'twilio',
+        'Twilio',
+        '📱',
+        'SMS',
+        'Send SMS alerts to a phone number via Twilio.',
+        '[{"k": "accountSid", "ph": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "label": "Account SID"}, {"k": "authToken", "ph": "", "label": "Auth Token"}, {"k": "from", "ph": "+12345678900", "label": "From Number"}, {"k": "to", "ph": "+12345678900", "label": "To Number"}]',
+        9
+    ),
+    (
+        'beemsms',
+        'Beem Africa',
+        '📲',
+        'SMS',
+        'Send SMS alerts via Beem Africa.',
+        '[{"k": "apiKey", "ph": "", "label": "API Key"}, {"k": "secretKey", "ph": "", "label": "Secret Key"}, {"k": "senderId", "ph": "MYAPP", "label": "Sender ID"}, {"k": "to", "ph": "+255700000000", "label": "To Number"}]',
+        10
+    ),
+    (
+        'msteams',
+        'Microsoft Teams',
+        '🟣',
+        'Messaging',
+        'Post alerts to a Teams channel via a Workflows webhook.',
+        '[{"k":"webhookUrl","label":"Workflow URL","ph":"https://prod-00.westeurope.logic.azure.com:443/workflows/..."}]',
+        11
+    ),
+    (
+        'googlechat',
+        'Google Chat',
+        '💠',
+        'Messaging',
+        'Post alerts to a Google Chat space via webhook.',
+        '[{"k":"webhookUrl","label":"Webhook URL","ph":"https://chat.googleapis.com/v1/spaces/.../messages?key=..."}]',
+        12
+    ),
+    (
+        'mattermost',
+        'Mattermost',
+        '🔷',
+        'Messaging',
+        'Post alerts to a Mattermost channel via an incoming webhook.',
+        '[{"k":"webhookUrl","label":"Webhook URL","ph":"https://mattermost.example.com/hooks/xxxxxxxx"},{"k":"channel","label":"Channel override (optional)","ph":"alerts"}]',
+        13
+    ),
+    (
+        'whatsapp',
+        'WhatsApp',
+        '🟢',
+        'Messaging',
+        'Send alerts to WhatsApp via the Business Cloud API. Set a template name — free-form text is only delivered within 24 hours of the recipient messaging you.',
+        '[{"k":"phoneNumberId","label":"Phone Number ID","ph":"123456789012345"},{"k":"accessToken","label":"Access Token","ph":""},{"k":"to","label":"To Number","ph":"+255700000000"},{"k":"templateName","label":"Template Name (recommended)","ph":"streamlogia_alert"},{"k":"templateLanguage","label":"Template Language (optional)","ph":"en"}]',
+        14
+    ),
+    (
+        'github',
+        'GitHub',
+        '🐙',
+        'Ticketing',
+        'Open a GitHub issue when an alert fires.',
+        '[{"k":"owner","label":"Owner","ph":"my-org"},{"k":"repo","label":"Repository","ph":"my-service"},{"k":"token","label":"Access Token","ph":"github_pat_..."},{"k":"labels","label":"Labels (optional, comma separated)","ph":"incident,logs"},{"k":"apiBaseUrl","label":"API Base URL (optional, Enterprise)","ph":"https://github.example.com/api/v3"}]',
+        15
+    ),
+    (
+        'linear',
+        'Linear',
+        '📐',
+        'Ticketing',
+        'Create a Linear issue when an alert fires.',
+        '[{"k":"apiKey","label":"API Key","ph":"lin_api_..."},{"k":"teamId","label":"Team ID","ph":"a1b2c3d4-..."},{"k":"priority","label":"Priority 0-4 (optional)","ph":"2"}]',
+        16
+    ),
+    (
+        'africastalking',
+        'Africa''s Talking',
+        '📶',
+        'SMS',
+        'Send SMS alerts via Africa''s Talking.',
+        '[{"k":"username","label":"Username","ph":"myapp"},{"k":"apiKey","label":"API Key","ph":""},{"k":"to","label":"To Number","ph":"+254700000000"},{"k":"from","label":"Sender ID (optional)","ph":"MYAPP"},{"k":"sandbox","label":"Sandbox? true/false (optional)","ph":"false"}]',
+        17
+    )
+ON CONFLICT (id) DO NOTHING;

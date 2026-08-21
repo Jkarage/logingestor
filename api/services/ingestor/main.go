@@ -378,18 +378,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 		return fmt.Errorf("integration encryption key must be a 64-character hex string (32 bytes): %w", err)
 	}
 
-	integrationCallers := map[string]integrationbus.Caller{
-		"slack":     providers.NewSlack(),
-		"discord":   providers.NewDiscord(),
-		"telegram":  providers.NewTelegram(),
-		"pagerduty": providers.NewPagerDuty(),
-		"webhook":   providers.NewWebhook(),
-		"email":     providers.NewEmail(em),
-		"opsgenie":  providers.NewOpsGenie(),
-		"jira":      providers.NewJira(),
-		"twilio":    providers.NewTwilio(),
-		"beemsms":   providers.NewBeemSMS(),
-	}
+	integrationCallers := providers.All(em)
 
 	integrationStorage := integrationdb.NewStore(log, db, encKey)
 	integrationBus := integrationbus.NewBusiness(log, integrationStorage, integrationCallers)
