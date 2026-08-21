@@ -43,7 +43,13 @@ type IngestEvent struct {
 
 	UserID string `json:"userId"`
 	OrgID  string `json:"orgId"`
-	Role   string `json:"role"`
+
+	// ProjectID is the project the user was working in when it broke. Like the
+	// other identity fields it is a hint, honoured only if that project belongs
+	// to the reporter's org — but unlike them it decides whether the issue can
+	// alert, because rules and channels are project-scoped.
+	ProjectID string `json:"projectId"`
+	Role      string `json:"role"`
 
 	API *struct {
 		Method string `json:"method"`
@@ -132,6 +138,7 @@ func (app Accepted) HTTPStatus() int { return http.StatusAccepted }
 type Issue struct {
 	ID            string   `json:"id"`
 	OrgID         *string  `json:"orgId"`
+	ProjectID     *string  `json:"projectId"`
 	Title         string   `json:"title"`
 	Culprit       string   `json:"culprit"`
 	Level         string   `json:"level"`
@@ -190,6 +197,10 @@ func toAppIssue(i clienterrorbus.Issue) Issue {
 		s := i.OrgID.String()
 		out.OrgID = &s
 	}
+	if i.ProjectID != nil {
+		s := i.ProjectID.String()
+		out.ProjectID = &s
+	}
 	if i.ResolvedAt != nil {
 		s := i.ResolvedAt.Format(time.RFC3339)
 		out.ResolvedAt = &s
@@ -217,6 +228,7 @@ type Event struct {
 	UserAgent      string         `json:"userAgent"`
 	UserID         *string        `json:"userId"`
 	OrgID          *string        `json:"orgId"`
+	ProjectID      *string        `json:"projectId"`
 	Role           string         `json:"role,omitempty"`
 	API            map[string]any `json:"api,omitempty"`
 	Breadcrumbs    []Breadcrumb   `json:"breadcrumbs"`
@@ -259,6 +271,10 @@ func toAppEvent(e clienterrorbus.Event) Event {
 	if e.OrgID != nil {
 		s := e.OrgID.String()
 		out.OrgID = &s
+	}
+	if e.ProjectID != nil {
+		s := e.ProjectID.String()
+		out.ProjectID = &s
 	}
 	if e.API != nil {
 		out.API = map[string]any{

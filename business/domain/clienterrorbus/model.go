@@ -142,7 +142,12 @@ type NewEvent struct {
 type Reporter struct {
 	UserID *uuid.UUID
 	OrgID  *uuid.UUID
-	Role   string
+
+	// ProjectID is the project the user was working in. It is what makes a crash
+	// alertable: rules and delivery channels are project-scoped, so a report
+	// without one can be grouped and triaged but cannot page anybody.
+	ProjectID *uuid.UUID
+	Role      string
 }
 
 // Event is a stored error report.
@@ -150,6 +155,7 @@ type Event struct {
 	ID             uuid.UUID
 	EventID        uuid.UUID
 	OrgID          *uuid.UUID
+	ProjectID      *uuid.UUID
 	UserID         *uuid.UUID
 	Role           string
 	Level          string
@@ -175,6 +181,7 @@ type Event struct {
 type Issue struct {
 	ID            uuid.UUID
 	OrgID         *uuid.UUID
+	ProjectID     *uuid.UUID
 	Fingerprint   string
 	Title         string
 	Culprit       string
@@ -206,9 +213,13 @@ type UpdateIssue struct {
 
 // IssueFilter narrows an issue listing.
 type IssueFilter struct {
-	// OrgID scopes the listing. Nil with IncludeAnonymous means the anonymous
-	// bucket, which only a super admin may read.
-	OrgID  *uuid.UUID
+	// OrgID scopes the listing. Nil means the anonymous bucket, which only a
+	// super admin may read.
+	OrgID *uuid.UUID
+
+	// ProjectID narrows to one project within the org.
+	ProjectID *uuid.UUID
+
 	Status string
 
 	// Release, when set, restricts to issues seen on that release.

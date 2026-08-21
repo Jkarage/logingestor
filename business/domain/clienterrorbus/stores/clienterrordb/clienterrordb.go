@@ -28,7 +28,7 @@ func NewStore(log *logger.Logger, db *sqlx.DB) *Store {
 	return &Store{log: log, db: db}
 }
 
-const eventColumns = `id, event_id, org_id, user_id, role, level, kind, name, message,
+const eventColumns = `id, event_id, org_id, project_id, user_id, role, level, kind, name, message,
 	stack, component_stack, release, environment, url, user_agent, api, breadcrumbs,
 	occurred_at, received_at, fingerprint, issue_id, sampled_count`
 
@@ -44,11 +44,11 @@ func (s *Store) Ingest(ctx context.Context, events []clienterrorbus.Event) (int,
 
 	const q = `
 	INSERT INTO client_error_events
-		(id, event_id, org_id, user_id, role, level, kind, name, message, stack,
+		(id, event_id, org_id, project_id, user_id, role, level, kind, name, message, stack,
 		 component_stack, release, environment, url, user_agent, api, breadcrumbs,
 		 occurred_at, received_at, sampled_count)
 	VALUES
-		(:id, :event_id, :org_id, :user_id, :role, :level, :kind, :name, :message, :stack,
+		(:id, :event_id, :org_id, :project_id, :user_id, :role, :level, :kind, :name, :message, :stack,
 		 :component_stack, :release, :environment, :url, :user_agent, :api, :breadcrumbs,
 		 :occurred_at, :received_at, :sampled_count)
 	ON CONFLICT (event_id) DO NOTHING`
@@ -159,7 +159,7 @@ func (s *Store) UpsertIssue(ctx context.Context, i clienterrorbus.Issue) (client
 	// first and inserting on a miss is correct here because the insert is still
 	// guarded by those indexes: a lost race surfaces as a duplicate-key error and
 	// the retry finds the winner's row.
-	existing, err := s.queryIssueByFingerprint(ctx, i.OrgID, i.Fingerprint)
+	existing, err := s.queryIssueByFingerprint(ctx, i.OrgID, i.ProjectID, i.Fingerprint)
 	switch {
 	case err == nil:
 		return existing, false, nil
@@ -169,18 +169,18 @@ func (s *Store) UpsertIssue(ctx context.Context, i clienterrorbus.Issue) (client
 
 	const q = `
 	INSERT INTO client_error_issues
-		(id, org_id, fingerprint, title, culprit, level, kind, status,
+		(id, org_id, project_id, fingerprint, title, culprit, level, kind, status,
 		 event_count, first_seen_at, last_seen_at, sample_event_id)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8, 1, $9, $9, $10)`
+		($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $10, $11)`
 
 	if _, err := s.db.ExecContext(ctx, q,
-		i.ID, i.OrgID, i.Fingerprint, i.Title, i.Culprit, i.Level, i.Kind, i.Status,
+		i.ID, i.OrgID, i.ProjectID, i.Fingerprint, i.Title, i.Culprit, i.Level, i.Kind, i.Status,
 		i.FirstSeenAt.UTC(), i.SampleEventID); err != nil {
 
 		if errors.Is(err, sqldb.ErrDBDuplicatedEntry) {
 			// Another worker created it between the read and the insert.
-			existing, rerr := s.queryIssueByFingerprint(ctx, i.OrgID, i.Fingerprint)
+			existing, rerr := s.queryIssueByFingerprint(ctx, i.OrgID, i.ProjectID, i.Fingerprint)
 			if rerr != nil {
 				return clienterrorbus.Issue{}, false, rerr
 			}
@@ -195,17 +195,26 @@ func (s *Store) UpsertIssue(ctx context.Context, i clienterrorbus.Issue) (client
 	return i, true, nil
 }
 
-// queryIssueByFingerprint finds an issue in an org's scope, treating a nil org
-// as the anonymous bucket.
-func (s *Store) queryIssueByFingerprint(ctx context.Context, orgID *uuid.UUID, fingerprint string) (clienterrorbus.Issue, error) {
-	q := `SELECT ` + issueColumns + `, 0 AS affected_users, 0 AS affected_orgs, NULL AS releases
-	FROM client_error_issues WHERE fingerprint = $1 AND org_id IS NULL`
+// queryIssueByFingerprint finds an issue in its scope: the project when there is
+// one, otherwise the org, otherwise the anonymous bucket. The three cases match
+// the three partial unique indexes exactly, so a lookup and an insert can never
+// disagree about which issue a fingerprint belongs to.
+func (s *Store) queryIssueByFingerprint(ctx context.Context, orgID, projectID *uuid.UUID, fingerprint string) (clienterrorbus.Issue, error) {
+	const base = `SELECT ` + issueColumns + `, 0 AS affected_users, 0 AS affected_orgs, NULL AS releases
+	FROM client_error_issues WHERE fingerprint = $1 AND `
+
+	var q string
 	args := []any{fingerprint}
 
-	if orgID != nil {
-		q = `SELECT ` + issueColumns + `, 0 AS affected_users, 0 AS affected_orgs, NULL AS releases
-		FROM client_error_issues WHERE fingerprint = $1 AND org_id = $2`
+	switch {
+	case projectID != nil:
+		q = base + `project_id = $2`
+		args = append(args, *projectID)
+	case orgID != nil:
+		q = base + `project_id IS NULL AND org_id = $2`
 		args = append(args, *orgID)
+	default:
+		q = base + `project_id IS NULL AND org_id IS NULL`
 	}
 
 	var db issueDB
@@ -219,7 +228,7 @@ func (s *Store) queryIssueByFingerprint(ctx context.Context, orgID *uuid.UUID, f
 	return toBusIssue(db), nil
 }
 
-const issueColumns = `id, org_id, fingerprint, title, culprit, level, kind, status,
+const issueColumns = `id, org_id, project_id, fingerprint, title, culprit, level, kind, status,
 	regressed, event_count, first_seen_at, last_seen_at, resolved_at, assignee_id,
 	sample_event_id`
 
@@ -330,6 +339,10 @@ func (s *Store) QueryIssues(ctx context.Context, f clienterrorbus.IssueFilter) (
 		add("i.org_id = ?", *f.OrgID)
 	default:
 		where = append(where, "i.org_id IS NULL")
+	}
+
+	if f.ProjectID != nil {
+		add("i.project_id = ?", *f.ProjectID)
 	}
 
 	if f.Status != "" {
@@ -476,7 +489,7 @@ func (s *Store) QueryIssueSeries(ctx context.Context, issueID uuid.UUID, from, t
 }
 
 // QueryStats returns the dashboard tiles for a window.
-func (s *Store) QueryStats(ctx context.Context, orgID *uuid.UUID, allOrgs bool, from, to time.Time) (clienterrorbus.Stats, error) {
+func (s *Store) QueryStats(ctx context.Context, orgID, projectID *uuid.UUID, allOrgs bool, from, to time.Time) (clienterrorbus.Stats, error) {
 	scope := "org_id IS NULL"
 	args := []any{from.UTC(), to.UTC()}
 
@@ -486,6 +499,11 @@ func (s *Store) QueryStats(ctx context.Context, orgID *uuid.UUID, allOrgs bool, 
 	case orgID != nil:
 		scope = "org_id = $3"
 		args = append(args, *orgID)
+	}
+
+	if projectID != nil {
+		scope += fmt.Sprintf(" AND project_id = $%d", len(args)+1)
+		args = append(args, *projectID)
 	}
 
 	q := `

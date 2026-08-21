@@ -14,6 +14,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/clienterrorbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/business/types/role"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -23,6 +24,7 @@ type app struct {
 	log            *logger.Logger
 	clientErrorBus *clienterrorbus.Business
 	orgBus         orgbus.ExtBusiness
+	projectBus     projectbus.ExtBusiness
 
 	// authClient resolves an optional token on the public ingest route. It is not
 	// middleware there, because middleware would refuse the anonymous reports
@@ -43,6 +45,7 @@ func newApp(cfg Config) *app {
 		log:            cfg.Log,
 		clientErrorBus: cfg.ClientErrorBus,
 		orgBus:         cfg.OrgBus,
+		projectBus:     cfg.ProjectBus,
 		authClient:     cfg.AuthClient,
 		allowedOrigins: origins,
 		limiter:        newIngestLimiter(),
@@ -73,18 +76,34 @@ func windowFor(r *http.Request) (from, to time.Time, err error) {
 // org at once, and the anonymous bucket — which is where the pre-login errors
 // live, so somebody has to be able to see them.
 type scope struct {
-	orgID   *uuid.UUID
-	allOrgs bool
+	orgID     *uuid.UUID
+	projectID *uuid.UUID
+	allOrgs   bool
 }
 
-// orgScope resolves the org named in the path.
+// orgScope resolves the org named in the path, plus an optional ?projectId=
+// narrowing within it.
+//
+// The project is not verified against the org here: the query filters on both,
+// so a project from another org simply matches nothing. That is the same answer
+// a non-existent project gives, which is what we want it to be.
 func orgScope(r *http.Request) (scope, web.Encoder) {
 	orgID, err := uuid.Parse(web.Param(r, "org_id"))
 	if err != nil {
 		return scope{}, errs.New(errs.InvalidArgument, mid.ErrInvalidID)
 	}
 
-	return scope{orgID: &orgID}, nil
+	sc := scope{orgID: &orgID}
+
+	if v := r.URL.Query().Get("projectId"); v != "" {
+		projectID, err := uuid.Parse(v)
+		if err != nil {
+			return scope{}, errs.New(errs.InvalidArgument, errors.New("invalid projectId"))
+		}
+		sc.projectID = &projectID
+	}
+
+	return sc, nil
 }
 
 // globalScope is the super-admin view: every org plus anonymous reports.
@@ -122,11 +141,12 @@ func (a *app) listIssues(ctx context.Context, r *http.Request, sc scope) web.Enc
 	q := r.URL.Query()
 
 	filter := clienterrorbus.IssueFilter{
-		OrgID:   sc.orgID,
-		AllOrgs: sc.allOrgs,
-		Release: q.Get("release"),
-		Sort:    q.Get("sort"),
-		Cursor:  q.Get("cursor"),
+		OrgID:     sc.orgID,
+		ProjectID: sc.projectID,
+		AllOrgs:   sc.allOrgs,
+		Release:   q.Get("release"),
+		Sort:      q.Get("sort"),
+		Cursor:    q.Get("cursor"),
 	}
 
 	if status := q.Get("status"); status != "" {
@@ -289,7 +309,7 @@ func (a *app) statsFor(ctx context.Context, r *http.Request, sc scope) web.Encod
 		return errs.New(errs.InvalidArgument, err)
 	}
 
-	s, err := a.clientErrorBus.QueryStats(ctx, sc.orgID, sc.allOrgs, from, to)
+	s, err := a.clientErrorBus.QueryStats(ctx, sc.orgID, sc.projectID, sc.allOrgs, from, to)
 	if err != nil {
 		return errs.Errorf(errs.Internal, "querystats: %s", err)
 	}

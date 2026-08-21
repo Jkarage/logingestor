@@ -15,6 +15,7 @@ type eventDB struct {
 	ID             uuid.UUID      `db:"id"`
 	EventID        uuid.UUID      `db:"event_id"`
 	OrgID          *uuid.UUID     `db:"org_id"`
+	ProjectID      *uuid.UUID     `db:"project_id"`
 	UserID         *uuid.UUID     `db:"user_id"`
 	Role           *string        `db:"role"`
 	Level          string         `db:"level"`
@@ -58,7 +59,7 @@ func toDBEvent(e clienterrorbus.Event) eventDB {
 	}
 
 	db := eventDB{
-		ID: e.ID, EventID: e.EventID, OrgID: e.OrgID, UserID: e.UserID,
+		ID: e.ID, EventID: e.EventID, OrgID: e.OrgID, ProjectID: e.ProjectID, UserID: e.UserID,
 		Level: e.Level, Kind: e.Kind, Name: e.Name, Message: e.Message,
 		Stack: e.Stack, ComponentStack: e.ComponentStack,
 		Release: e.Release, Environment: e.Environment, URL: e.URL, UserAgent: e.UserAgent,
@@ -84,7 +85,7 @@ func toDBEvent(e clienterrorbus.Event) eventDB {
 
 func toBusEvent(db eventDB) clienterrorbus.Event {
 	e := clienterrorbus.Event{
-		ID: db.ID, EventID: db.EventID, OrgID: db.OrgID, UserID: db.UserID,
+		ID: db.ID, EventID: db.EventID, OrgID: db.OrgID, ProjectID: db.ProjectID, UserID: db.UserID,
 		Level: db.Level, Kind: db.Kind, Name: db.Name, Message: db.Message,
 		Stack: db.Stack, ComponentStack: db.ComponentStack,
 		Release: db.Release, Environment: db.Environment, URL: db.URL, UserAgent: db.UserAgent,
@@ -125,6 +126,7 @@ func toBusEvent(db eventDB) clienterrorbus.Event {
 type issueDB struct {
 	ID            uuid.UUID  `db:"id"`
 	OrgID         *uuid.UUID `db:"org_id"`
+	ProjectID     *uuid.UUID `db:"project_id"`
 	Fingerprint   string     `db:"fingerprint"`
 	Title         string     `db:"title"`
 	Culprit       string     `db:"culprit"`
@@ -147,7 +149,7 @@ type issueDB struct {
 
 func toBusIssue(db issueDB) clienterrorbus.Issue {
 	i := clienterrorbus.Issue{
-		ID: db.ID, OrgID: db.OrgID, Fingerprint: db.Fingerprint,
+		ID: db.ID, OrgID: db.OrgID, ProjectID: db.ProjectID, Fingerprint: db.Fingerprint,
 		Title: db.Title, Culprit: db.Culprit, Level: db.Level, Kind: db.Kind,
 		Status: db.Status, Regressed: db.Regressed, EventCount: db.EventCount,
 		FirstSeenAt: db.FirstSeenAt.UTC(), LastSeenAt: db.LastSeenAt.UTC(),

@@ -71,6 +71,7 @@ import (
 	"github.com/jkarage/logingestor/business/domain/viewbus/stores/viewdb"
 	"github.com/jkarage/logingestor/business/sdk/alerting"
 	"github.com/jkarage/logingestor/business/sdk/auditexport"
+	"github.com/jkarage/logingestor/business/sdk/clientalert"
 	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
@@ -191,6 +192,12 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// live longer.
 			EventDays int `conf:"default:30"`
 			IssueDays int `conf:"default:180"`
+
+			// AlertingEnabled routes new issues and regressions through the
+			// project's alert rules. A project's existing level rules will match
+			// these, since a frontend crash in that project is an error in it;
+			// a rule that should not can name a source in its condition.
+			AlertingEnabled bool `conf:"default:true,env:CLIENT_ERRORS_ALERTING_ENABLED"`
 		}
 		Alerting struct {
 			// Threshold rules are decided on a timer because a threshold is a
@@ -416,11 +423,16 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// API keys are hashed like the SCIM tokens: compared, never recovered.
 	apiKeyBus := apikeybus.NewBusiness(log, apikeydb.NewStore(log, db))
 
-	// Client error monitoring. The notifier is nil for now: alert rules and
-	// integration connections are project-scoped and a browser crash has no
-	// project, so routing these through the existing channels needs a modelling
-	// decision rather than a wire-up. Grouping and the dashboard work without it.
-	clientErrorBus := clienterrorbus.NewBusiness(log, clienterrordb.NewStore(log, db), nil)
+	// Client error monitoring. A crash is attributed to the project the user was
+	// working in, which is what lets its alerts run through the project's own
+	// rules, channels, dedup window and maintenance windows rather than a second
+	// delivery path. Disabling the notifier leaves grouping and the dashboard
+	// working and stops delivery only.
+	var clientErrorNotifier clienterrorbus.Notifier
+	if cfg.ClientErrors.AlertingEnabled {
+		clientErrorNotifier = clientalert.New(log, integrationBus)
+	}
+	clientErrorBus := clienterrorbus.NewBusiness(log, clienterrordb.NewStore(log, db), clientErrorNotifier)
 
 	logOtelExt := logotel.NewExtension()
 	logAlertExt := logalert.NewExtension(log, projectBus, integrationBus)

@@ -517,7 +517,7 @@ func Test_ClientError_Integration_SortingAndPaging(t *testing.T) {
 	}
 
 	// A status filter narrows, and the stats tiles agree with the list.
-	stats, err := h.bus.QueryStats(ctx, &h.fixture.OrgID, false, time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Minute))
+	stats, err := h.bus.QueryStats(ctx, &h.fixture.OrgID, nil, false, time.Now().UTC().Add(-time.Hour), time.Now().UTC().Add(time.Minute))
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
@@ -665,5 +665,122 @@ func Test_ClientError_Integration_ScrubbingIsEnforcedAtTheStore(t *testing.T) {
 		if strings.Contains(blob, secret) {
 			t.Errorf("stored row still contains %q: %s", secret, blob)
 		}
+	}
+}
+
+// The same bug in two projects of one org is two issues, because two teams will
+// fix it separately and each has its own alert rules.
+func Test_ClientError_Integration_IssuesAreScopedPerProject(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	second := uuid.New()
+	if _, err := h.db.DB.Exec(`
+		INSERT INTO projects (id, org_id, name, date_created, date_updated)
+		VALUES ($1, $2, 'second', NOW(), NOW())`, second, h.fixture.OrgID); err != nil {
+		t.Fatalf("second project: %v", err)
+	}
+
+	for _, project := range []uuid.UUID{h.fixture.ProjectID, second} {
+		p := project
+		if _, err := h.bus.Ingest(ctx, clienterrorbus.Reporter{OrgID: &h.fixture.OrgID, ProjectID: &p},
+			[]clienterrorbus.NewEvent{event("shared bug", "SharedView")}); err != nil {
+			t.Fatalf("ingest: %v", err)
+		}
+	}
+	if _, err := h.bus.ProcessBatch(ctx, 10); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	all, _, err := h.bus.QueryIssues(ctx, clienterrorbus.IssueFilter{OrgID: &h.fixture.OrgID})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("got %d issues, want one per project", len(all))
+	}
+	if all[0].Fingerprint != all[1].Fingerprint {
+		t.Errorf("the same bug produced different fingerprints")
+	}
+
+	// And the filter narrows to one of them.
+	one, _, err := h.bus.QueryIssues(ctx, clienterrorbus.IssueFilter{OrgID: &h.fixture.OrgID, ProjectID: &second})
+	if err != nil {
+		t.Fatalf("query by project: %v", err)
+	}
+	if len(one) != 1 || one[0].ProjectID == nil || *one[0].ProjectID != second {
+		t.Errorf("project filter returned %d issues", len(one))
+	}
+
+	// A report with no project is a third issue, not folded into either: it is a
+	// crash we cannot attribute, and pretending otherwise would page a team for
+	// something that may not be theirs.
+	if _, err := h.bus.Ingest(ctx, clienterrorbus.Reporter{OrgID: &h.fixture.OrgID},
+		[]clienterrorbus.NewEvent{event("shared bug", "SharedView")}); err != nil {
+		t.Fatalf("ingest without a project: %v", err)
+	}
+	if _, err := h.bus.ProcessBatch(ctx, 10); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	all, _, err = h.bus.QueryIssues(ctx, clienterrorbus.IssueFilter{OrgID: &h.fixture.OrgID})
+	if err != nil {
+		t.Fatalf("query again: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("got %d issues, want three scopes", len(all))
+	}
+
+	// Deleting a project takes its issues, and leaves the others.
+	if _, err := h.db.DB.Exec(`DELETE FROM projects WHERE id = $1`, second); err != nil {
+		t.Fatalf("delete project: %v", err)
+	}
+	all, _, err = h.bus.QueryIssues(ctx, clienterrorbus.IssueFilter{OrgID: &h.fixture.OrgID})
+	if err != nil {
+		t.Fatalf("query after delete: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("got %d issues after deleting a project, want 2", len(all))
+	}
+}
+
+// Only an issue with a project can alert, since that is where rules live.
+func Test_ClientError_Integration_NotifiesOnlyWithAProject(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	// Anonymous, then org-only, then project-scoped: three distinct issues.
+	batches := []clienterrorbus.Reporter{
+		{},
+		{OrgID: &h.fixture.OrgID},
+		{OrgID: &h.fixture.OrgID, ProjectID: &h.fixture.ProjectID},
+	}
+	for i, who := range batches {
+		if _, err := h.bus.Ingest(ctx, who, []clienterrorbus.NewEvent{event(fmt.Sprintf("scope %d", i), "View")}); err != nil {
+			t.Fatalf("ingest %d: %v", i, err)
+		}
+	}
+	if _, err := h.bus.ProcessBatch(ctx, 10); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+
+	// The recorder is told about all three; it is the delivery adapter that
+	// declines the ones with no project, and that decision is asserted in the
+	// clientalert tests.
+	if len(h.notes.opened) != 3 {
+		t.Fatalf("notified %d new issues, want 3", len(h.notes.opened))
+	}
+
+	var withProject int
+	for _, i := range h.notes.opened {
+		if i.ProjectID != nil {
+			withProject++
+			if *i.ProjectID != h.fixture.ProjectID {
+				t.Errorf("issue carried the wrong project: %s", i.ProjectID)
+			}
+		}
+	}
+	if withProject != 1 {
+		t.Errorf("%d notified issues carry a project, want 1", withProject)
 	}
 }

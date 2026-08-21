@@ -190,6 +190,7 @@ func (a *app) reporter(ctx context.Context, r *http.Request, req IngestRequest) 
 	if superAdmin {
 		who.OrgID = &hint
 		who.Role = role.Admin.String()
+		who.ProjectID = a.resolveProject(ctx, req, hint)
 
 		return who
 	}
@@ -208,7 +209,46 @@ func (a *app) reporter(ctx context.Context, r *http.Request, req IngestRequest) 
 		}
 	}
 
+	if who.OrgID != nil {
+		who.ProjectID = a.resolveProject(ctx, req, *who.OrgID)
+	}
+
 	return who
+}
+
+// resolveProject accepts the project hint only if that project belongs to the
+// org the reporter was just confirmed to be a member of.
+//
+// The project is what makes a crash alertable, so an unchecked hint would let a
+// report page another team — and would let someone probe which project ids
+// exist by watching whose dashboard the issue lands on.
+func (a *app) resolveProject(ctx context.Context, req IngestRequest, orgID uuid.UUID) *uuid.UUID {
+	hint := firstProjectHint(req)
+	if hint == uuid.Nil || a.projectBus == nil {
+		return nil
+	}
+
+	project, err := a.projectBus.QueryByID(ctx, hint)
+	if err != nil || project.OrgID != orgID {
+		return nil
+	}
+
+	return &hint
+}
+
+// firstProjectHint returns the project the batch claims to belong to. A batch
+// comes from one page in one session, so the first usable hint speaks for it.
+func firstProjectHint(req IngestRequest) uuid.UUID {
+	for _, e := range req.Events {
+		if e.ProjectID == "" {
+			continue
+		}
+		if id, err := uuid.Parse(e.ProjectID); err == nil {
+			return id
+		}
+	}
+
+	return uuid.Nil
 }
 
 // firstOrgHint returns the org id the batch claims to belong to. A batch comes

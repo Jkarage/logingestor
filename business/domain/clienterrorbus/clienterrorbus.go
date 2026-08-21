@@ -32,7 +32,7 @@ type Storer interface {
 	UpdateIssue(ctx context.Context, i Issue) error
 	QueryIssueEvents(ctx context.Context, issueID uuid.UUID, limit int) ([]Event, error)
 	QueryIssueSeries(ctx context.Context, issueID uuid.UUID, from, to time.Time, interval time.Duration) ([]Bucket, error)
-	QueryStats(ctx context.Context, orgID *uuid.UUID, allOrgs bool, from, to time.Time) (Stats, error)
+	QueryStats(ctx context.Context, orgID, projectID *uuid.UUID, allOrgs bool, from, to time.Time) (Stats, error)
 	PurgeOrg(ctx context.Context, orgID uuid.UUID) (int64, error)
 }
 
@@ -104,6 +104,7 @@ func (b *Business) Ingest(ctx context.Context, who Reporter, events []NewEvent) 
 			ID:             uuid.New(),
 			EventID:        ne.EventID,
 			OrgID:          who.OrgID,
+			ProjectID:      who.ProjectID,
 			UserID:         who.UserID,
 			Role:           who.Role,
 			Level:          ne.Level,
@@ -178,6 +179,7 @@ func (b *Business) group(ctx context.Context, e Event) error {
 	issue, created, err := b.storer.UpsertIssue(ctx, Issue{
 		ID:            uuid.New(),
 		OrgID:         e.OrgID,
+		ProjectID:     e.ProjectID,
 		Fingerprint:   fingerprint,
 		Title:         title,
 		Culprit:       culprit,
@@ -331,8 +333,8 @@ func (b *Business) UpdateIssue(ctx context.Context, i Issue, ui UpdateIssue) (Is
 }
 
 // QueryStats returns the dashboard tiles for a window.
-func (b *Business) QueryStats(ctx context.Context, orgID *uuid.UUID, allOrgs bool, from, to time.Time) (Stats, error) {
-	s, err := b.storer.QueryStats(ctx, orgID, allOrgs, from, to)
+func (b *Business) QueryStats(ctx context.Context, orgID, projectID *uuid.UUID, allOrgs bool, from, to time.Time) (Stats, error) {
+	s, err := b.storer.QueryStats(ctx, orgID, projectID, allOrgs, from, to)
 	if err != nil {
 		return Stats{}, fmt.Errorf("querystats: %w", err)
 	}

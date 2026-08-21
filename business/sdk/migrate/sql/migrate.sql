@@ -1067,10 +1067,6 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Version: 1.40
 -- Description: Client error monitoring — raw events, grouped issues, and facets
--- Note on the number: darwin parses a version as a float, so this migration is
--- recorded as 1.4 and sorts after 1.39 by value, not by text. The next one must
--- be 1.41 or higher for the same reason — 1.5 would also work, but 1.41 keeps
--- the file order and the applied order the same.
 -- Browser crash reports. These are the application's own errors, not customer
 -- log data, and they are deliberately kept in their own tables: the volume,
 -- retention and privacy rules are all different from logs.
@@ -1198,3 +1194,61 @@ CREATE TABLE IF NOT EXISTS client_error_issue_facets (
     CONSTRAINT client_error_issue_facets_issue_fk FOREIGN KEY (issue_id) REFERENCES client_error_issues (id) ON DELETE CASCADE
 );
 
+
+-- Version: 1.41
+-- Description: Scope client errors to a project
+-- On the numbering: darwin parses a version as a float, so 1.40 was recorded as
+-- 1.4 and this one sorts after it by value rather than by text. Keep going up
+-- from here (1.42, 1.43); a bare 1.5 would also sort correctly but would make
+-- the file order and the applied order diverge. And never edit an applied
+-- migration, comments included — the checksum covers the whole body.
+-- A crash is attributed to the project the user was working in when it
+-- happened. That is what lets alerting reuse what already exists: every alert
+-- rule and integration connection in the product is project-scoped, so a
+-- client error with a project routes through the same rules, the same channels,
+-- the same dedup window and the same maintenance windows as everything else.
+--
+-- Nullable, because two cases legitimately have no project: a crash on the
+-- landing or login page, and a report from a signed-in user who was not looking
+-- at a project. Those group and triage as before and simply cannot alert.
+ALTER TABLE client_error_events ADD COLUMN IF NOT EXISTS project_id UUID NULL;
+ALTER TABLE client_error_issues ADD COLUMN IF NOT EXISTS project_id UUID NULL;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_error_events_project_fk') THEN
+        ALTER TABLE client_error_events
+        ADD CONSTRAINT client_error_events_project_fk FOREIGN KEY (project_id)
+            REFERENCES projects (id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'client_error_issues_project_fk') THEN
+        ALTER TABLE client_error_issues
+        ADD CONSTRAINT client_error_issues_project_fk FOREIGN KEY (project_id)
+            REFERENCES projects (id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS client_error_events_project_time_idx
+    ON client_error_events (project_id, occurred_at DESC) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS client_error_issues_project_seen_idx
+    ON client_error_issues (project_id, last_seen_at DESC) WHERE project_id IS NOT NULL;
+
+-- An issue is one fingerprint within one scope, and the scope is now the
+-- project when there is one. Two teams in the same org hitting the same bug in
+-- different projects triage it separately, because they will fix it separately.
+--
+-- The three indexes are mutually exclusive by their WHERE clauses, so exactly
+-- one governs any given row. The old pair is replaced rather than kept: leaving
+-- the org-wide one in place would forbid the same fingerprint in two projects
+-- of one org, which is the case this migration exists to allow.
+DROP INDEX IF EXISTS client_error_issues_org_fp_uq;
+DROP INDEX IF EXISTS client_error_issues_anon_fp_uq;
+
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_project_fp_uq
+    ON client_error_issues (project_id, fingerprint) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_org_fp_uq
+    ON client_error_issues (org_id, fingerprint) WHERE project_id IS NULL AND org_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS client_error_issues_anon_fp_uq
+    ON client_error_issues (fingerprint) WHERE project_id IS NULL AND org_id IS NULL;

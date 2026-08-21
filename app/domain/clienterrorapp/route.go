@@ -7,6 +7,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/clienterrorbus"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
+	"github.com/jkarage/logingestor/business/domain/projectbus"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -17,6 +18,7 @@ type Config struct {
 	AuthClient     authclient.Authenticator
 	ClientErrorBus *clienterrorbus.Business
 	OrgBus         orgbus.ExtBusiness
+	ProjectBus     projectbus.ExtBusiness
 
 	// AllowedOrigins is the set of hosts allowed to post error reports. Empty
 	// means any, which is only appropriate in development.
