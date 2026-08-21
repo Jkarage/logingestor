@@ -47,6 +47,35 @@ func (n *Notifier) IssueRegressed(ctx context.Context, issue clienterrorbus.Issu
 	n.fire(ctx, issue, sample, "Client error regressed")
 }
 
+// IssueSpiked delivers a rate-change alert for a known issue — the case that is
+// neither new nor a regression, and the one a bad deploy usually produces.
+func (n *Notifier) IssueSpiked(ctx context.Context, issue clienterrorbus.Issue, spike clienterrorbus.Spike) {
+	if n.alerts == nil || issue.ProjectID == nil {
+		return
+	}
+
+	// The numbers are the alert: "spiking" without them tells nobody whether to
+	// stop the rollout.
+	detail := fmt.Sprintf("%s: %s — %d in the last %s, %.0f× the previous rate",
+		"Client error spiking", issue.Title, spike.Current, spike.Window, spike.Multiple())
+
+	payload := integrationbus.AlertPayload{
+		ProjectName: "Client error spiking",
+		Level:       alertLevel(issue.Level),
+		Message:     detail,
+		Source:      Source,
+		Timestamp:   issue.LastSeenAt,
+	}
+
+	if issue.Culprit != "" {
+		payload.Message += " (" + issue.Culprit + ")"
+	}
+
+	if err := n.alerts.FireAlerts(ctx, *issue.ProjectID, []integrationbus.AlertPayload{payload}); err != nil {
+		n.log.Error(ctx, "clientalert: spike delivery failed", "issueID", issue.ID, "err", err)
+	}
+}
+
 // fire hands one issue to the project's alert rules.
 //
 // An issue with no project cannot be delivered: rules and connections belong to

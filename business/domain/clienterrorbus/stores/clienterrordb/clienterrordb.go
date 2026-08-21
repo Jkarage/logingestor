@@ -737,3 +737,78 @@ func (s *Store) DetachFromIssue(ctx context.Context, issueID uuid.UUID, count in
 
 	return nil
 }
+
+// QuerySpikes finds issues whose rate in the current window is a multiple of the
+// rate before it.
+//
+// One query rather than a scan per issue: the two periods are aggregated
+// separately and joined, so the whole comparison is a single time-range read
+// served by client_error_events_occurred_idx.
+//
+// Two conditions keep the result to things worth waking someone for. An issue
+// first seen inside the window is excluded because a new issue already alerts as
+// new, and a spike alert for it would be the same news twice. An ignored issue
+// is excluded because ignoring is a standing decision, not a snooze.
+func (s *Store) QuerySpikes(ctx context.Context, cfg clienterrorbus.SpikeConfig, now time.Time) ([]clienterrorbus.Spike, error) {
+	baselineStart, windowStart, windowEnd := clienterrorbus.SpikeBounds(cfg, now)
+
+	// The baseline is a total over a longer period, so it is scaled to the
+	// window's length before the comparison. A dormant issue has a zero baseline;
+	// GREATEST keeps the division meaningful and lets a jump from nothing count.
+	//
+	// Both fractions are CAST explicitly below. Postgres infers a parameter's
+	// type from its context, and `bigint * $n` resolves to integer multiplication
+	// — which silently truncated this 0.1667 to 0, making every issue look like
+	// it had no baseline and therefore every issue a spike.
+	scale := cfg.Window.Seconds() / cfg.Baseline.Seconds()
+
+	q := `
+	WITH current AS (
+		SELECT issue_id, sum(sampled_count) AS n
+		FROM client_error_events
+		WHERE issue_id IS NOT NULL AND occurred_at >= $2 AND occurred_at < $3
+		GROUP BY issue_id
+	), baseline AS (
+		SELECT issue_id, sum(sampled_count) AS n
+		FROM client_error_events
+		WHERE issue_id IS NOT NULL AND occurred_at >= $1 AND occurred_at < $2
+		GROUP BY issue_id
+	)
+	SELECT ` + prefixed("i", issueColumns) + `,
+		COALESCE(facets.affected_users, 0) AS affected_users,
+		COALESCE(facets.affected_orgs, 0)  AS affected_orgs,
+		facets.releases,
+		c.n AS current_count,
+		COALESCE(b.n, 0) * CAST($6 AS numeric) AS baseline_rate
+	FROM current c
+	JOIN client_error_issues i ON i.id = c.issue_id
+	LEFT JOIN baseline b ON b.issue_id = c.issue_id` + facetSelect + `
+	WHERE i.status <> 'ignored'
+	  AND i.first_seen_at < $2
+	  AND c.n >= $4
+	  AND CAST(c.n AS numeric) >= CAST($5 AS numeric) * GREATEST(COALESCE(b.n, 0) * CAST($6 AS numeric), 1)
+	ORDER BY c.n DESC`
+
+	var rows []struct {
+		issueDB
+		CurrentCount int64   `db:"current_count"`
+		BaselineRate float64 `db:"baseline_rate"`
+	}
+	if err := s.db.SelectContext(ctx, &rows, q,
+		baselineStart, windowStart, windowEnd,
+		cfg.MinEvents, cfg.Multiplier, scale); err != nil {
+		return nil, fmt.Errorf("selectcontext: %w", err)
+	}
+
+	out := make([]clienterrorbus.Spike, len(rows))
+	for i, r := range rows {
+		out[i] = clienterrorbus.Spike{
+			Issue:    toBusIssue(r.issueDB),
+			Current:  r.CurrentCount,
+			Baseline: r.BaselineRate,
+			Window:   cfg.Window,
+		}
+	}
+
+	return out, nil
+}

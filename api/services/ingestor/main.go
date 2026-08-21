@@ -204,6 +204,16 @@ func run(ctx context.Context, log *logger.Logger) error {
 			// forgot to configure it should fail to upload rather than accept
 			// maps from anyone.
 			UploadToken string `conf:"env:CLIENT_ERRORS_UPLOAD_TOKEN,mask"`
+
+			// Spike detection. An existing issue whose rate jumps is neither new
+			// nor a regression, so without this nothing fires for the most common
+			// way a release goes wrong.
+			SpikesEnabled   bool          `conf:"default:true,env:CLIENT_ERRORS_SPIKES_ENABLED"`
+			SpikeInterval   time.Duration `conf:"default:2m"`
+			SpikeWindow     time.Duration `conf:"default:10m"`
+			SpikeBaseline   time.Duration `conf:"default:1h"`
+			SpikeMultiplier float64       `conf:"default:5"`
+			SpikeMinEvents  int           `conf:"default:25"`
 		}
 		Alerting struct {
 			// Threshold rules are decided on a timer because a threshold is a
@@ -524,6 +534,26 @@ func run(ctx context.Context, log *logger.Logger) error {
 		log.Info(ctx, "startup", "status", "threshold alert evaluator disabled")
 	}
 
+	if cfg.ClientErrors.SpikesEnabled {
+		spikeCfg := clienterrorbus.SpikeConfig{
+			Window:     cfg.ClientErrors.SpikeWindow,
+			Baseline:   cfg.ClientErrors.SpikeBaseline,
+			Multiplier: cfg.ClientErrors.SpikeMultiplier,
+			MinEvents:  cfg.ClientErrors.SpikeMinEvents,
+		}
+
+		log.Info(ctx, "startup", "status", "client error spike detector started",
+			"interval", cfg.ClientErrors.SpikeInterval.String(),
+			"window", spikeCfg.Window.String(),
+			"baseline", spikeCfg.Baseline.String(),
+			"multiplier", spikeCfg.Multiplier,
+			"min_events", spikeCfg.MinEvents)
+
+		go runClientErrorSpikes(retentionCtx, log, clientErrorBus, spikeCfg, cfg.ClientErrors.SpikeInterval)
+	} else {
+		log.Info(ctx, "startup", "status", "client error spike detector disabled")
+	}
+
 	if cfg.ClientErrors.Enabled {
 		log.Info(ctx, "startup", "status", "client error grouping worker started",
 			"interval", cfg.ClientErrors.Interval.String(), "batch_size", cfg.ClientErrors.BatchSize)
@@ -769,6 +799,39 @@ func runClientErrorGrouping(ctx context.Context, log *logger.Logger, bus *client
 			if n < batchSize {
 				break
 			}
+		}
+	}
+}
+
+// runClientErrorSpikes looks for issues whose rate has jumped, until ctx is
+// cancelled.
+//
+// It is separate from the grouping worker because the two have nothing to do
+// with each other's cadence: grouping wants to run as fast as events arrive,
+// while a rate comparison over a ten minute window has nothing new to say twice
+// a minute.
+func runClientErrorSpikes(ctx context.Context, log *logger.Logger, bus *clienterrorbus.Business, cfg clienterrorbus.SpikeConfig, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		found, err := bus.EvaluateSpikes(ctx, cfg)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error(ctx, "client error spike detection failed", "msg", err)
+			continue
+		}
+
+		if found > 0 {
+			log.Info(ctx, "client errors spiking", "issues", found)
 		}
 	}
 }

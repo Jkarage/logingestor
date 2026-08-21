@@ -27,6 +27,7 @@ type harness struct {
 type recorder struct {
 	opened    []clienterrorbus.Issue
 	regressed []clienterrorbus.Issue
+	spiked    []clienterrorbus.Spike
 }
 
 func (r *recorder) IssueOpened(_ context.Context, i clienterrorbus.Issue, _ clienterrorbus.Event) {
@@ -35,6 +36,10 @@ func (r *recorder) IssueOpened(_ context.Context, i clienterrorbus.Issue, _ clie
 
 func (r *recorder) IssueRegressed(_ context.Context, i clienterrorbus.Issue, _ clienterrorbus.Event) {
 	r.regressed = append(r.regressed, i)
+}
+
+func (r *recorder) IssueSpiked(_ context.Context, _ clienterrorbus.Issue, s clienterrorbus.Spike) {
+	r.spiked = append(r.spiked, s)
 }
 
 func newHarness(t *testing.T) harness {

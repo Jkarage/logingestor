@@ -375,3 +375,148 @@ func Test_ClientAlert_Integration_LevelMapping(t *testing.T) {
 		t.Errorf("fatal mapped to %q, want ERROR — the rules have four levels", sent[0].Level)
 	}
 }
+
+// A spike is the third trigger, and it delivers through the same rule and
+// channel as the other two.
+func Test_ClientAlert_Integration_SpikeFires(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	h.rule(t, "ERROR", integrationbus.Condition{})
+
+	cfg := clienterrorbus.SpikeConfig{
+		Window:     10 * time.Minute,
+		Baseline:   time.Hour,
+		Multiplier: 5,
+		MinEvents:  25,
+	}
+	baselineStart, windowStart, _ := clienterrorbus.SpikeBounds(cfg, time.Now().UTC())
+
+	who := clienterrorbus.Reporter{OrgID: &h.fixture.OrgID, ProjectID: &h.fixture.ProjectID}
+
+	ingest := func(at time.Time, n int) {
+		t.Helper()
+
+		batch := make([]clienterrorbus.NewEvent, 0, n)
+		for i := 0; i < n; i++ {
+			e := crash("the rate is climbing")
+			e.OccurredAt = at
+			batch = append(batch, e)
+		}
+
+		for start := 0; start < len(batch); start += clienterrorbus.MaxBatchEvents {
+			end := min(start+clienterrorbus.MaxBatchEvents, len(batch))
+			if _, err := h.errors.Ingest(ctx, who, batch[start:end]); err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+		}
+
+		for {
+			processed, err := h.errors.ProcessBatch(ctx, 200)
+			if err != nil {
+				t.Fatalf("process: %v", err)
+			}
+			if processed == 0 {
+				break
+			}
+		}
+	}
+
+	// A trickle through the baseline hour, then a burst.
+	ingest(baselineStart.Add(time.Minute), 2)
+	ingest(windowStart.Add(time.Minute), 80)
+
+	// The first sighting already delivered one alert; clear the slate so what
+	// follows is unambiguous, and move the notification out of the dedup window
+	// the way an hour of real time would.
+	if _, err := h.db.DB.Exec(`UPDATE alert_events SET last_notified_at = NOW() - interval '2 hours'`); err != nil {
+		t.Fatalf("backdate the last notification: %v", err)
+	}
+	before := len(h.provider.delivered())
+
+	// The issue has to be known rather than brand new, which is what makes this a
+	// spike and not the new-issue alert again.
+	if _, err := h.db.DB.Exec(`UPDATE client_error_issues SET first_seen_at = $1`, baselineStart); err != nil {
+		t.Fatalf("backdate the issue: %v", err)
+	}
+
+	found, err := h.errors.EvaluateSpikes(ctx, cfg)
+	if err != nil {
+		t.Fatalf("evaluate spikes: %v", err)
+	}
+	if found != 1 {
+		t.Fatalf("found %d spikes, want 1", found)
+	}
+
+	sent := h.provider.delivered()
+	if len(sent) != before+1 {
+		t.Fatalf("delivered %d alerts, want one more than %d", len(sent), before)
+	}
+
+	p := sent[len(sent)-1]
+	if p.Source != clientalert.Source {
+		t.Errorf("source = %q, want %q", p.Source, clientalert.Source)
+	}
+	if !strings.Contains(p.Message, "spiking") {
+		t.Errorf("message does not say what happened: %q", p.Message)
+	}
+	// The numbers are the alert: "spiking" without them tells nobody whether to
+	// stop the rollout.
+	if !strings.Contains(p.Message, "80 in the last 10m") {
+		t.Errorf("message does not carry the rate: %q", p.Message)
+	}
+	if !strings.Contains(p.Message, "×") {
+		t.Errorf("message does not carry the multiple: %q", p.Message)
+	}
+}
+
+// An issue with no project cannot alert, spikes included — there are no rules to
+// run through and no team it belongs to.
+func Test_ClientAlert_Integration_SpikeNeedsAProject(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	h.rule(t, "ERROR", integrationbus.Condition{})
+
+	cfg := clienterrorbus.SpikeConfig{Window: 10 * time.Minute, Baseline: time.Hour, Multiplier: 5, MinEvents: 25}
+	_, windowStart, _ := clienterrorbus.SpikeBounds(cfg, time.Now().UTC())
+
+	// Org-scoped, no project.
+	who := clienterrorbus.Reporter{OrgID: &h.fixture.OrgID}
+
+	batch := make([]clienterrorbus.NewEvent, 0, 50)
+	for i := 0; i < 50; i++ {
+		e := crash("unattributed burst")
+		e.OccurredAt = windowStart.Add(time.Minute)
+		batch = append(batch, e)
+	}
+	if _, err := h.errors.Ingest(ctx, who, batch); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	for {
+		processed, err := h.errors.ProcessBatch(ctx, 200)
+		if err != nil {
+			t.Fatalf("process: %v", err)
+		}
+		if processed == 0 {
+			break
+		}
+	}
+
+	if _, err := h.db.DB.Exec(`UPDATE client_error_issues SET first_seen_at = NOW() - interval '2 days'`); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	before := len(h.provider.delivered())
+
+	found, err := h.errors.EvaluateSpikes(ctx, cfg)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if found != 1 {
+		t.Fatalf("found %d spikes, want the detector to see it", found)
+	}
+	if got := len(h.provider.delivered()); got != before {
+		t.Errorf("delivered %d alerts for an unattributed spike, want %d", got, before)
+	}
+}

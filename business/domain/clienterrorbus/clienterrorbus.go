@@ -41,6 +41,8 @@ type Storer interface {
 	QueryArtifact(ctx context.Context, release, fileName string) ([]byte, error)
 	QueryArtifactsByRelease(ctx context.Context, release string) ([]Artifact, error)
 	MarkReleaseForRegroup(ctx context.Context, release string, belowVersion int) (int64, error)
+
+	QuerySpikes(ctx context.Context, cfg SpikeConfig, now time.Time) ([]Spike, error)
 }
 
 // Notifier is told about issues worth waking someone for. It is an interface so
@@ -49,6 +51,11 @@ type Storer interface {
 type Notifier interface {
 	IssueOpened(ctx context.Context, i Issue, sample Event)
 	IssueRegressed(ctx context.Context, i Issue, sample Event)
+
+	// IssueSpiked reports a known issue whose rate has jumped. It is the third
+	// trigger and the one that catches "the deploy made an existing bug much
+	// worse" — which is neither new nor a regression, so nothing else fires.
+	IssueSpiked(ctx context.Context, i Issue, spike Spike)
 }
 
 // Business manages the set of APIs for client error monitoring.

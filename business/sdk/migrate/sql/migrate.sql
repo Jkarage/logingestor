@@ -1297,3 +1297,13 @@ ALTER TABLE client_error_events ADD COLUMN IF NOT EXISTS resolved_stack TEXT NUL
 CREATE INDEX IF NOT EXISTS client_error_events_regroup_idx
     ON client_error_events (release, fingerprint_version)
     WHERE processed_at IS NOT NULL;
+
+-- Version: 1.43
+-- Description: Index the client error time range spike detection scans
+-- Spike detection asks "how many events did each issue get in the last ten
+-- minutes, and how many in the hour before that" — a time range across every
+-- issue at once, which none of the existing indexes serve: they are keyed by
+-- issue, org or project first. Partial on issue_id because an ungrouped event
+-- has no rate to compare.
+CREATE INDEX IF NOT EXISTS client_error_events_occurred_idx
+    ON client_error_events (occurred_at DESC) WHERE issue_id IS NOT NULL;
