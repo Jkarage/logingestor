@@ -26,6 +26,11 @@ type Usage struct {
 	// ErrorCount is how many of the accepted events were at ERROR. It feeds the
 	// health error rate and is not part of quota accounting.
 	ErrorCount int64
+
+	// RejectCount is how many records the request refused. It is the exact
+	// figure: the dead-letter store keeps only a sample, so this is what a total
+	// must be read from.
+	RejectCount int64
 }
 
 // SourceCounters is one source's ingest counters over a window.

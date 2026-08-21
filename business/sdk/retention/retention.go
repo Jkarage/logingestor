@@ -50,6 +50,10 @@ const (
 // being briefly unreferenced.
 const mapGracePeriod = 7 * 24 * time.Hour
 
+// defaultRejectDays is how long a refused ingest record is kept. It exists to
+// diagnose a shipper that is misbehaving now, so a week is generous.
+const defaultRejectDays = 7
+
 // Config bounds one retention run so a scheduled pass makes steady progress
 // without monopolising the database.
 type Config struct {
@@ -73,6 +77,10 @@ type Config struct {
 	// is short by design and negative keeps them forever. Zero means the default.
 	SourceStatsDays int
 
+	// RejectDays is how long a refused ingest record is kept. Zero means the
+	// default; negative keeps them forever.
+	RejectDays int
+
 	// ClientErrorEventDays and ClientErrorIssueDays bound client error
 	// monitoring. Raw browser reports are the bulk and age out first; the issues
 	// they group into are small, are what a human triages, and keep their
@@ -95,6 +103,9 @@ func (c Config) withDefaults() Config {
 	if c.SourceStatsDays == 0 {
 		c.SourceStatsDays = defaultSourceStatsDays
 	}
+	if c.RejectDays == 0 {
+		c.RejectDays = defaultRejectDays
+	}
 	if c.ClientErrorEventDays == 0 {
 		c.ClientErrorEventDays = defaultClientErrorEventDays
 	}
@@ -109,6 +120,10 @@ type Result struct {
 	InfraDeleted int64
 	AppDeleted   int64
 	AuditDeleted int64
+
+	// RejectsDeleted counts pruned refused ingest records. Outside Total for the
+	// same reason as the counters: they are diagnostics, not ingested data.
+	RejectsDeleted int64
 
 	// SourceStatsDeleted counts pruned per-source hourly counter rows. It is not
 	// part of Total: those rows are derived counters, not ingested data, and
@@ -229,6 +244,11 @@ func Run(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (Resu
 		return res, err
 	}
 
+	res.RejectsDeleted, err = pruneRejects(ctx, log, db, cfg)
+	if err != nil {
+		return res, err
+	}
+
 	log.Info(ctx, "retention complete",
 		"infra_deleted", res.InfraDeleted,
 		"app_deleted", res.AppDeleted,
@@ -266,6 +286,34 @@ func pruneSourceStats(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg 
 
 	if deleted > 0 {
 		log.Info(ctx, "retention pruned source stats", "days", cfg.SourceStatsDays, "deleted", deleted)
+	}
+
+	return deleted, nil
+}
+
+// pruneRejects ages out the refused ingest records kept for debugging. There is
+// nothing derived from them, so this is a plain delete by age.
+func pruneRejects(ctx context.Context, log *logger.Logger, db *sqlx.DB, cfg Config) (int64, error) {
+	if !expires(cfg.RejectDays) {
+		return 0, nil
+	}
+
+	cutoff := time.Now().UTC().Add(-time.Duration(cfg.RejectDays) * 24 * time.Hour)
+
+	const q = `DELETE FROM ingest_rejects WHERE received_at < $1`
+
+	r, err := db.ExecContext(ctx, q, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune rejects: %w", err)
+	}
+
+	deleted, err := r.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+
+	if deleted > 0 {
+		log.Info(ctx, "retention pruned ingest rejects", "days", cfg.RejectDays, "deleted", deleted)
 	}
 
 	return deleted, nil

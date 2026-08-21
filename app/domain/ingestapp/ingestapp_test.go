@@ -17,7 +17,9 @@ import (
 	"github.com/jkarage/logingestor/app/domain/logapp"
 	"github.com/jkarage/logingestor/business/domain/logbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
+	"github.com/jkarage/logingestor/business/sdk/ingest"
 	"github.com/jkarage/logingestor/foundation/logger"
 	"github.com/jkarage/logingestor/foundation/web"
 )
@@ -412,5 +414,148 @@ func Test_bulk_UnexpiredKeys_Accepted(t *testing.T) {
 				t.Errorf("status %d: no logs written", resp.StatusCode)
 			}
 		})
+	}
+}
+
+// fakeRejectStorer records what the ingest path handed the dead-letter store.
+type fakeRejectStorer struct {
+	mu      sync.Mutex
+	stored  []rejectbus.Reject
+	counted int
+}
+
+func (f *fakeRejectStorer) Store(_ context.Context, rejects []rejectbus.Reject) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.stored = append(f.stored, rejects...)
+
+	return len(rejects), nil
+}
+
+func (f *fakeRejectStorer) CountSince(context.Context, uuid.UUID, time.Time) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return f.counted, nil
+}
+
+func (f *fakeRejectStorer) Query(context.Context, rejectbus.Filter) ([]rejectbus.Reject, error) {
+	return nil, nil
+}
+
+func (f *fakeRejectStorer) CountByKind(context.Context, uuid.UUID, time.Time) (map[string]int64, error) {
+	return nil, nil
+}
+
+func (f *fakeRejectStorer) records() []rejectbus.Reject {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return append([]rejectbus.Reject(nil), f.stored...)
+}
+
+// A refused record reaches the dead-letter store carrying the payload that was
+// refused — the number alone was always in the response, and the record is the
+// part that explains it.
+func Test_bulk_RejectedRecordsAreKept(t *testing.T) {
+	src, rawKey := activeSource()
+	store := &fakeRejectStorer{}
+
+	lg := logger.New(io.Discard, logger.LevelError, "TEST", nil)
+	app := web.NewApp(lg.Info, nil)
+	ingestapp.Routes(app, ingestapp.Config{
+		Log:        lg,
+		LogBus:     &fakeLogBus{},
+		SourceBus:  fakeSourceBus{src: src},
+		ProjectBus: fakeProjectBus{},
+		RejectBus:  rejectbus.NewBusiness(lg, store, ingest.NewRedactor(), 100),
+		Hub:        logapp.NewHub(),
+	})
+	srv := httptest.NewServer(app)
+	t.Cleanup(srv.Close)
+
+	// A line that is not JSON, a line that parses but has no message, and one
+	// good line — the two failure kinds and a success in one request.
+	body := `{"message":"fine"}
+{"message": "unterminated
+{"host":"no-message-here","level":"INFO"}`
+
+	resp := doPost(t, srv, "/v1/ingest/bulk", "application/x-ndjson", rawKey, body)
+	defer resp.Body.Close()
+
+	var out ingestapp.BulkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Accepted != 1 || out.Rejected != 2 {
+		t.Fatalf("accepted=%d rejected=%d, want 1/2 (%+v)", out.Accepted, out.Rejected, out.Errors)
+	}
+
+	// The response must not echo the payloads back: it is the caller's own data
+	// and repeating a failing batch doubles traffic that is already failing.
+	raw, _ := json.Marshal(out)
+	if strings.Contains(string(raw), "no-message-here") {
+		t.Errorf("the response echoed a rejected payload: %s", raw)
+	}
+
+	// Storing is asynchronous, so give the goroutine a moment.
+	var kept []rejectbus.Reject
+	for i := 0; i < 50; i++ {
+		kept = store.records()
+		if len(kept) == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if len(kept) != 2 {
+		t.Fatalf("kept %d rejects, want 2", len(kept))
+	}
+
+	byKind := map[string]rejectbus.Reject{}
+	for _, r := range kept {
+		byKind[r.Kind] = r
+
+		if r.SourceID != src.ID || r.OrgID != src.OrgID || r.ProjectID != src.ProjectID {
+			t.Errorf("a reject was filed against the wrong tenant: %+v", r)
+		}
+	}
+
+	parse, ok := byKind[rejectbus.KindParse]
+	if !ok {
+		t.Fatalf("no parse failure was kept: %+v", kept)
+	}
+	if !strings.Contains(parse.Payload, "unterminated") {
+		t.Errorf("the parse failure lost its payload: %q", parse.Payload)
+	}
+
+	validate, ok := byKind[rejectbus.KindValidate]
+	if !ok {
+		t.Fatalf("no validation failure was kept: %+v", kept)
+	}
+	if !strings.Contains(validate.Payload, "no-message-here") {
+		t.Errorf("the validation failure lost its payload: %q", validate.Payload)
+	}
+	if validate.Reason == "" {
+		t.Errorf("the validation failure lost its reason")
+	}
+}
+
+// With no store wired the ingest path behaves exactly as it did before the
+// dead-letter store existed: counted, not kept.
+func Test_bulk_RejectsWithoutAStore(t *testing.T) {
+	src, rawKey := activeSource()
+	srv := newTestServer(t, fakeSourceBus{src: src}, &fakeLogBus{})
+
+	resp := doPost(t, srv, "/v1/ingest/bulk", "application/x-ndjson", rawKey, `{"host":"no-message"}`)
+	defer resp.Body.Close()
+
+	var out ingestapp.BulkResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Rejected != 1 {
+		t.Errorf("rejected = %d, want 1", out.Rejected)
 	}
 }

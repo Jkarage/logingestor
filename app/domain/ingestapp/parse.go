@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
 )
 
 // readLimited reads up to max bytes from r, erroring if the body exceeds it.
@@ -36,7 +38,12 @@ func parseRecords(contentType string, body []byte) ([]BulkRecord, []RecordError)
 		// JSON array.
 		var arr []BulkRecord
 		if err := json.Unmarshal(trimmed, &arr); err != nil {
-			return nil, []RecordError{{Index: 0, Error: fmt.Sprintf("invalid JSON array: %v", err)}}
+			// The whole document is the offending record here: there are no lines
+			// to blame individually.
+			return nil, []RecordError{{
+				Index: 0, Error: fmt.Sprintf("invalid JSON array: %v", err),
+				Kind: rejectbus.KindParse, Payload: string(trimmed),
+			}}
 		}
 		return arr, nil
 	}
@@ -45,7 +52,10 @@ func parseRecords(contentType string, body []byte) ([]BulkRecord, []RecordError)
 		// Single JSON object.
 		var one BulkRecord
 		if err := json.Unmarshal(trimmed, &one); err != nil {
-			return nil, []RecordError{{Index: 0, Error: fmt.Sprintf("invalid JSON object: %v", err)}}
+			return nil, []RecordError{{
+				Index: 0, Error: fmt.Sprintf("invalid JSON object: %v", err),
+				Kind: rejectbus.KindParse, Payload: string(trimmed),
+			}}
 		}
 		return []BulkRecord{one}, nil
 	}
@@ -61,7 +71,10 @@ func parseRecords(contentType string, body []byte) ([]BulkRecord, []RecordError)
 		}
 		var rec BulkRecord
 		if err := json.Unmarshal(line, &rec); err != nil {
-			errs = append(errs, RecordError{Index: i, Error: fmt.Sprintf("invalid JSON: %v", err)})
+			errs = append(errs, RecordError{
+				Index: i, Error: fmt.Sprintf("invalid JSON: %v", err),
+				Kind: rejectbus.KindParse, Payload: string(line),
+			})
 			continue
 		}
 		records = append(records, rec)

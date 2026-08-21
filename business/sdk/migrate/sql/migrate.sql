@@ -1327,3 +1327,48 @@ ALTER TABLE api_keys
 ALTER TABLE api_keys
     ADD CONSTRAINT api_keys_rate_limit_non_negative
     CHECK (rate_limit_per_min >= 0 AND rate_limit_burst >= 0);
+
+-- Version: 1.45
+-- Description: Dead-letter store for rejected ingest records
+-- A rejected record was counted and then thrown away, so "we are shipping ten
+-- thousand events and three hundred are being refused" had no answer beyond the
+-- number. A shipper runs unattended and usually does not log our response, which
+-- is exactly when the record itself is the only thing that explains the refusal.
+--
+-- This is a sample store, not a queue that anything drains. A broken shipper
+-- rejects everything at full volume, so storing all of it would mean the flood
+-- lands in the database instead of being shed: at most a fixed number per source
+-- per hour is kept, and ingest_stats_hourly.reject_count carries the true total
+-- so the sampling cannot make the numbers lie.
+CREATE TABLE IF NOT EXISTS ingest_rejects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL,
+    org_id UUID NOT NULL,
+    project_id UUID NOT NULL,
+
+    -- parse: the bytes were not the JSON we expected. validate: they parsed and
+    -- then failed a rule. The two need different fixes, so they are told apart.
+    kind TEXT NOT NULL CHECK (kind IN ('parse', 'validate')),
+
+    -- The index the record had in the request that carried it, which is what the
+    -- response reported at the time.
+    record_index INT NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL,
+
+    -- The offending record, scrubbed and truncated. It is the customer's own
+    -- data, kept briefly for their own debugging.
+    payload TEXT NOT NULL DEFAULT '',
+
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT ingest_rejects_source_fk FOREIGN KEY (source_id) REFERENCES sources (id) ON DELETE CASCADE,
+    CONSTRAINT ingest_rejects_org_fk FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE CASCADE,
+    CONSTRAINT ingest_rejects_project_fk FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
+
+-- Reading an org's or one source's recent rejects, and the per-hour cap check.
+CREATE INDEX IF NOT EXISTS ingest_rejects_org_time_idx ON ingest_rejects (org_id, received_at DESC);
+CREATE INDEX IF NOT EXISTS ingest_rejects_source_time_idx ON ingest_rejects (source_id, received_at DESC);
+
+-- The exact count, which the sample store deliberately does not carry.
+ALTER TABLE ingest_stats_hourly ADD COLUMN IF NOT EXISTS reject_count BIGINT NOT NULL DEFAULT 0;

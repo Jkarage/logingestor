@@ -12,6 +12,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/errs"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/foundation/web"
@@ -25,13 +26,17 @@ type app struct {
 	// optional: with no usage store wired, sources still list and every one
 	// reports the counters it has, which is none.
 	usageBus usagebus.ExtBusiness
+
+	// rejectBus reads the refused records. Optional for the same reason.
+	rejectBus *rejectbus.Business
 }
 
-func newApp(sourceBus sourcebus.ExtBusiness, projectBus projectbus.ExtBusiness, usageBus usagebus.ExtBusiness) *app {
+func newApp(sourceBus sourcebus.ExtBusiness, projectBus projectbus.ExtBusiness, usageBus usagebus.ExtBusiness, rejectBus *rejectbus.Business) *app {
 	return &app{
 		sourceBus:  sourceBus,
 		projectBus: projectBus,
 		usageBus:   usageBus,
+		rejectBus:  rejectBus,
 	}
 }
 

@@ -29,6 +29,17 @@ type BulkRecord struct {
 type RecordError struct {
 	Index int    `json:"index"`
 	Error string `json:"error"`
+
+	// Kind distinguishes a body we could not parse from one we parsed and then
+	// refused. It is not returned to the caller — the message already says which
+	// — but the dead-letter store keeps them apart because they need different
+	// fixes.
+	Kind string `json:"-"`
+
+	// Payload is the offending record, kept for the dead-letter store and
+	// deliberately not echoed back: it is the caller's own data, and a response
+	// that repeats a rejected batch doubles the traffic that is already failing.
+	Payload string `json:"-"`
 }
 
 // BulkResponse is returned by POST /v1/ingest/bulk. Partial success is allowed:

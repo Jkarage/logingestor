@@ -8,6 +8,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/orgbus"
 	"github.com/jkarage/logingestor/business/domain/projectbus"
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/domain/userbus"
@@ -25,6 +26,10 @@ type Config struct {
 	ProjectBus projectbus.ExtBusiness
 	SourceBus  sourcebus.ExtBusiness
 	UsageBus   usagebus.ExtBusiness
+
+	// RejectBus reads the dead-letter store. Nil leaves the endpoint answering
+	// that refused records are not being kept.
+	RejectBus *rejectbus.Business
 }
 
 // Routes adds specific routes for this group.
@@ -34,11 +39,15 @@ func Routes(app *web.App, cfg Config) {
 	authen := mid.Authenticate(cfg.AuthClient)
 	orgAdmin := mid.AuthorizeOrgAdmin(cfg.OrgBus)
 
-	api := newApp(cfg.SourceBus, cfg.ProjectBus, cfg.UsageBus)
+	api := newApp(cfg.SourceBus, cfg.ProjectBus, cfg.UsageBus, cfg.RejectBus)
 
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources", api.query, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources", api.create, authen, orgAdmin)
 	app.HandlerFunc(http.MethodDelete, version, "/orgs/{org_id}/sources/{source_id}", api.disconnect, authen, orgAdmin)
 	app.HandlerFunc(http.MethodPost, version, "/orgs/{org_id}/sources/{source_id}/rotate-key", api.rotateKey, authen, orgAdmin)
 	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/sources/{source_id}/health", api.health, authen, orgAdmin)
+
+	// The dead-letter store: which records were refused and why. Org admin,
+	// because a rejected record is the customer's own payload.
+	app.HandlerFunc(http.MethodGet, version, "/orgs/{org_id}/ingest-rejects", api.queryRejects, authen, orgAdmin)
 }

@@ -41,6 +41,7 @@ func (s *Store) Record(ctx context.Context, u usagebus.Usage) error {
 		ByteCount    int64     `db:"byte_count"`
 		DroppedCount int64     `db:"dropped_count"`
 		ErrorCount   int64     `db:"error_count"`
+		RejectCount  int64     `db:"reject_count"`
 	}{
 		SourceID:  u.SourceID.String(),
 		OrgID:     u.OrgID.String(),
@@ -54,6 +55,7 @@ func (s *Store) Record(ctx context.Context, u usagebus.Usage) error {
 		ByteCount:    u.ByteCount,
 		DroppedCount: u.DroppedCount,
 		ErrorCount:   u.ErrorCount,
+		RejectCount:  u.RejectCount,
 	}
 
 	const dailyQ = `
@@ -68,13 +70,14 @@ func (s *Store) Record(ctx context.Context, u usagebus.Usage) error {
 
 	const hourlyQ = `
 	INSERT INTO ingest_stats_hourly
-		(source_id, hour, event_count, error_count, dropped_count)
+		(source_id, hour, event_count, error_count, dropped_count, reject_count)
 	VALUES
-		(:source_id, :hour, :event_count, :error_count, :dropped_count)
+		(:source_id, :hour, :event_count, :error_count, :dropped_count, :reject_count)
 	ON CONFLICT (source_id, hour) DO UPDATE SET
 		event_count   = ingest_stats_hourly.event_count + EXCLUDED.event_count,
 		error_count   = ingest_stats_hourly.error_count + EXCLUDED.error_count,
-		dropped_count = ingest_stats_hourly.dropped_count + EXCLUDED.dropped_count`
+		dropped_count = ingest_stats_hourly.dropped_count + EXCLUDED.dropped_count,
+		reject_count  = ingest_stats_hourly.reject_count + EXCLUDED.reject_count`
 
 	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {

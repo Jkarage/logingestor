@@ -52,6 +52,8 @@ import (
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectaudit"
 	"github.com/jkarage/logingestor/business/domain/projectbus/extensions/projectotel"
 	"github.com/jkarage/logingestor/business/domain/projectbus/stores/projectdb"
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
+	"github.com/jkarage/logingestor/business/domain/rejectbus/stores/rejectdb"
 	"github.com/jkarage/logingestor/business/domain/scimbus"
 	"github.com/jkarage/logingestor/business/domain/scimbus/stores/scimdb"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
@@ -72,6 +74,7 @@ import (
 	"github.com/jkarage/logingestor/business/sdk/alerting"
 	"github.com/jkarage/logingestor/business/sdk/auditexport"
 	"github.com/jkarage/logingestor/business/sdk/clientalert"
+	"github.com/jkarage/logingestor/business/sdk/ingest"
 	"github.com/jkarage/logingestor/business/sdk/retention"
 	"github.com/jkarage/logingestor/business/sdk/sqldb"
 	"github.com/jkarage/logingestor/business/sdk/sqldb/delegate"
@@ -214,6 +217,16 @@ func run(ctx context.Context, log *logger.Logger) error {
 			SpikeBaseline   time.Duration `conf:"default:1h"`
 			SpikeMultiplier float64       `conf:"default:5"`
 			SpikeMinEvents  int           `conf:"default:25"`
+		}
+		Ingest struct {
+			// RejectHourlyCap is how many refused records are kept per source per
+			// hour. A broken shipper refuses everything at full volume, so this is
+			// a sample: the exact count goes to the hourly counters either way.
+			RejectHourlyCap int `conf:"default:100,env:INGEST_REJECT_HOURLY_CAP"`
+
+			// RejectDays is how long a kept record survives. It is a debugging aid
+			// for a live problem, not a record of anything, so it is short.
+			RejectDays int `conf:"default:7,env:INGEST_REJECT_DAYS"`
 		}
 		QueryAPI struct {
 			// The default budget for a read-only API key. A key may carry its own,
@@ -449,6 +462,11 @@ func run(ctx context.Context, log *logger.Logger) error {
 	// API keys are hashed like the SCIM tokens: compared, never recovered.
 	apiKeyBus := apikeybus.NewBusiness(log, apikeydb.NewStore(log, db))
 
+	// The dead-letter store shares the ingest redactor: a refused record never
+	// reaches the normaliser that would have scrubbed it, so the scrubbing has to
+	// happen on the way into storage instead.
+	rejectBus := rejectbus.NewBusiness(log, rejectdb.NewStore(log, db), ingest.NewRedactor(), cfg.Ingest.RejectHourlyCap)
+
 	// Client error monitoring. A crash is attributed to the project the user was
 	// working in, which is what lets its alerts run through the project's own
 	// rules, channels, dedup window and maintenance windows rather than a second
@@ -498,6 +516,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			MaxRuntime:      cfg.Retention.MaxRuntime,
 			AuditDays:       cfg.Retention.AuditDays,
 			SourceStatsDays: cfg.Retention.SourceStatsDays,
+			RejectDays:      cfg.Ingest.RejectDays,
 
 			ClientErrorEventDays: cfg.ClientErrors.EventDays,
 			ClientErrorIssueDays: cfg.ClientErrors.IssueDays,
@@ -605,6 +624,7 @@ func run(ctx context.Context, log *logger.Logger) error {
 			AnnotationBus:  annotationBus,
 			ClientErrorBus: clientErrorBus,
 			APIKeyBus:      apiKeyBus,
+			RejectBus:      rejectBus,
 		},
 		IngestorConfig: mux.IngestorConfig{
 			AuthClient: authClient,

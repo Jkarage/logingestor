@@ -113,6 +113,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		ProjectBus: cfg.BusConfig.ProjectBus,
 		SourceBus:  cfg.BusConfig.SourceBus,
 		UsageBus:   cfg.BusConfig.UsageBus,
+		RejectBus:  cfg.BusConfig.RejectBus,
 	})
 
 	ingestapp.Routes(app, ingestapp.Config{
@@ -121,6 +122,7 @@ func (all) Add(app *web.App, cfg mux.Config) {
 		SourceBus:  cfg.BusConfig.SourceBus,
 		ProjectBus: cfg.BusConfig.ProjectBus,
 		UsageBus:   cfg.BusConfig.UsageBus,
+		RejectBus:  cfg.BusConfig.RejectBus,
 		Hub:        cfg.LogHub,
 	})
 

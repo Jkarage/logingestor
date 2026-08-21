@@ -73,6 +73,7 @@ func Test_create_Success(t *testing.T) {
 		},
 		fakeProjectBus{project: projectbus.Project{ID: projectID, OrgID: orgID}},
 		nil,
+		nil,
 	)
 
 	r := httptest.NewRequest("POST", "/v1/orgs/"+orgID.String()+"/sources",
@@ -102,6 +103,7 @@ func Test_create_ProjectInDifferentOrg_404(t *testing.T) {
 		fakeSourceBus{},
 		fakeProjectBus{project: projectbus.Project{ID: projectID, OrgID: otherOrg}}, // different org
 		nil,
+		nil,
 	)
 
 	r := httptest.NewRequest("POST", "/v1/orgs/"+orgID.String()+"/sources",
@@ -115,7 +117,7 @@ func Test_create_BadKind_400(t *testing.T) {
 	orgID := uuid.New()
 	projectID := uuid.New()
 
-	a := newApp(fakeSourceBus{}, fakeProjectBus{project: projectbus.Project{ID: projectID, OrgID: orgID}}, nil)
+	a := newApp(fakeSourceBus{}, fakeProjectBus{project: projectbus.Project{ID: projectID, OrgID: orgID}}, nil, nil)
 
 	r := httptest.NewRequest("POST", "/v1/orgs/"+orgID.String()+"/sources",
 		strings.NewReader(`{"kind":"kafka","name":"prod","projectId":"`+projectID.String()+`"}`))
@@ -132,6 +134,7 @@ func Test_disconnect_CrossOrg_404(t *testing.T) {
 	a := newApp(
 		fakeSourceBus{byID: sourcebus.Source{ID: sourceID, OrgID: otherOrg}}, // belongs to another org
 		fakeProjectBus{},
+		nil,
 		nil,
 	)
 
@@ -171,6 +174,7 @@ func Test_query_AttachesHealth(t *testing.T) {
 			busy.ID:  {Events: 1000, Errors: 2, Dropped: 5},
 			angry.ID: {Events: 100, Errors: 40},
 		}},
+		nil,
 	)
 
 	r := httptest.NewRequest("GET", "/v1/orgs/"+orgID.String()+"/sources", nil)
@@ -227,6 +231,7 @@ func Test_health_ZeroFillsTheWindow(t *testing.T) {
 			counters: map[uuid.UUID]usagebus.SourceCounters{sourceID: {Events: 30, Errors: 1}},
 			buckets:  []usagebus.HourCounters{{Hour: hour, Events: 30, Errors: 1}},
 		},
+		nil,
 	)
 
 	r := httptest.NewRequest("GET", "/v1/orgs/"+orgID.String()+"/sources/"+sourceID.String()+"/health", nil)
@@ -269,6 +274,7 @@ func Test_health_CrossOrg_404(t *testing.T) {
 		fakeSourceBus{byID: sourcebus.Source{ID: sourceID, OrgID: uuid.New()}},
 		fakeProjectBus{},
 		fakeUsageBus{},
+		nil,
 	)
 
 	r := httptest.NewRequest("GET", "/v1/orgs/"+orgID.String()+"/sources/"+sourceID.String()+"/health", nil)

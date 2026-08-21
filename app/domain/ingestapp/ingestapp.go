@@ -4,6 +4,7 @@ package ingestapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -18,6 +19,7 @@ import (
 	"github.com/jkarage/logingestor/app/sdk/metrics"
 	"github.com/jkarage/logingestor/app/sdk/mid"
 	"github.com/jkarage/logingestor/business/domain/logbus"
+	"github.com/jkarage/logingestor/business/domain/rejectbus"
 	"github.com/jkarage/logingestor/business/domain/sourcebus"
 	"github.com/jkarage/logingestor/business/domain/usagebus"
 	"github.com/jkarage/logingestor/business/sdk/ingest"
@@ -37,6 +39,7 @@ type app struct {
 	logBus    logbus.ExtBusiness
 	sourceBus sourcebus.ExtBusiness
 	usageBus  usagebus.ExtBusiness // optional; nil disables quota + usage counters
+	rejectBus *rejectbus.Business  // optional; nil stops keeping refused records
 	hub       *logapp.Hub
 	redactor  *ingest.Redactor
 	limiter   *ingest.Limiter
@@ -45,13 +48,14 @@ type app struct {
 	lastTouch map[uuid.UUID]time.Time
 }
 
-func newApp(log *logger.Logger, logBus logbus.ExtBusiness, sourceBus sourcebus.ExtBusiness, usageBus usagebus.ExtBusiness, hub *logapp.Hub) *app {
+func newApp(cfg Config) *app {
 	return &app{
-		log:       log,
-		logBus:    logBus,
-		sourceBus: sourceBus,
-		usageBus:  usageBus,
-		hub:       hub,
+		log:       cfg.Log,
+		logBus:    cfg.LogBus,
+		sourceBus: cfg.SourceBus,
+		usageBus:  cfg.UsageBus,
+		rejectBus: cfg.RejectBus,
+		hub:       cfg.Hub,
 		redactor:  ingest.NewRedactor(),
 		limiter:   ingest.NewLimiter(),
 		lastTouch: make(map[uuid.UUID]time.Time),
@@ -85,7 +89,15 @@ func (a *app) bulk(ctx context.Context, r *http.Request) web.Encoder {
 	for i, br := range parsed {
 		rec, err := bulkToRecord(src, br, now)
 		if err != nil {
-			recErrs = append(recErrs, RecordError{Index: i, Error: err.Error()})
+			// The record parsed, so re-marshalling it is what the sender actually
+			// sent minus its own formatting — the fields are what matters for a
+			// validation failure.
+			payload, _ := json.Marshal(br)
+
+			recErrs = append(recErrs, RecordError{
+				Index: i, Error: err.Error(),
+				Kind: rejectbus.KindValidate, Payload: string(payload),
+			})
 			continue
 		}
 		recs = append(recs, rec)
@@ -154,7 +166,8 @@ func (a *app) process(ctx context.Context, src sourcebus.Source, recs []ingest.R
 		a.hub.BroadcastLogs(logs)
 	}
 
-	a.recordUsage(ctx, src, now, accepted, bodyLen, dropped, errored)
+	a.recordUsage(ctx, src, now, accepted, bodyLen, dropped, errored, len(recErrs))
+	a.storeRejects(ctx, src, recErrs)
 	a.touchLastSeen(ctx, src.ID, now)
 
 	metrics.AddIngestAccepted(ctx, accepted)
@@ -176,7 +189,7 @@ func (a *app) throttled(ctx context.Context, retry time.Duration, msg string) we
 
 // recordUsage folds this batch's counters into the source's daily tally. It is
 // best-effort and runs asynchronously so it never adds latency to the request.
-func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Time, accepted, bytes, dropped, errored int) {
+func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Time, accepted, bytes, dropped, errored, rejected int) {
 	if a.usageBus == nil {
 		return
 	}
@@ -189,12 +202,48 @@ func (a *app) recordUsage(ctx context.Context, src sourcebus.Source, now time.Ti
 		ByteCount:    int64(bytes),
 		DroppedCount: int64(dropped),
 		ErrorCount:   int64(errored),
+		RejectCount:  int64(rejected),
 	}
 	go func() {
 		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		if err := a.usageBus.Record(bg, u); err != nil {
 			a.log.Error(bg, "ingest: record usage", "sourceID", src.ID, "err", err)
+		}
+	}()
+}
+
+// storeRejects keeps a sample of the refused records for the sender to look at.
+//
+// Best-effort and asynchronous, like the usage counters: a shipper waiting on a
+// response should not wait on our diagnostics, and failing to store a rejection
+// must never turn a partial success into an error. The exact count went to the
+// hourly counters above, so what is kept here can be capped without the totals
+// becoming wrong.
+func (a *app) storeRejects(ctx context.Context, src sourcebus.Source, recErrs []RecordError) {
+	if a.rejectBus == nil || len(recErrs) == 0 {
+		return
+	}
+
+	rejects := make([]rejectbus.NewReject, 0, len(recErrs))
+	for _, e := range recErrs {
+		rejects = append(rejects, rejectbus.NewReject{
+			SourceID:    src.ID,
+			OrgID:       src.OrgID,
+			ProjectID:   src.ProjectID,
+			Kind:        e.Kind,
+			RecordIndex: e.Index,
+			Reason:      e.Error,
+			Payload:     e.Payload,
+		})
+	}
+
+	go func() {
+		bg, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+
+		if _, err := a.rejectBus.Store(bg, rejects); err != nil {
+			a.log.Error(bg, "ingest: store rejects", "sourceID", src.ID, "err", err)
 		}
 	}()
 }
